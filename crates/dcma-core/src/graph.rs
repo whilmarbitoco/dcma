@@ -390,31 +390,6 @@ impl CognitiveGraph {
         sub
     }
 
-    pub fn contradiction_edges(&self) -> Vec<(AtomId, AtomId, Decimal)> {
-        self.graph
-            .edge_indices()
-            .filter_map(|edge| {
-                let rel = self.graph.edge_weight(edge)?;
-                if rel.relation_type == RelationType::Contradicts {
-                    Some((rel.src, rel.dst, rel.weight.get()))
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    pub fn total_inbound_weight(&self, id: AtomId) -> Decimal {
-        let idx = match self.id_map.get(&id) {
-            Some(i) => *i,
-            None => return Decimal::ZERO,
-        };
-        self.graph
-            .edges_directed(idx, Direction::Incoming)
-            .map(|e| e.weight().weight.get())
-            .fold(Decimal::ZERO, |acc, w| acc + w)
-    }
-
     pub fn edges_of(&self, id: AtomId) -> Vec<(EdgeIndex, Direction, &Relation)> {
         let idx = match self.id_map.get(&id) {
             Some(i) => *i,
@@ -428,6 +403,41 @@ impl CognitiveGraph {
             result.push((edge.id(), Direction::Outgoing, edge.weight()));
         }
         result
+    }
+
+    /// Get atom by NodeIndex (for cross-crate access)
+    pub fn get_atom_by_index(&self, idx: NodeIndex) -> Option<&CognitiveAtom> {
+        self.graph.node_weight(idx)
+    }
+
+    /// Get mutable atom by NodeIndex (for cross-crate access)
+    pub fn get_atom_by_index_mut(&mut self, idx: NodeIndex) -> Option<&mut CognitiveAtom> {
+        self.graph.node_weight_mut(idx)
+    }
+
+    pub fn total_inbound_weight(&self, id: AtomId) -> Decimal {
+        let idx = match self.id_map.get(&id) {
+            Some(i) => *i,
+            None => return Decimal::ZERO,
+        };
+        self.graph
+            .edges_directed(idx, Direction::Incoming)
+            .map(|e| e.weight().weight.get())
+            .fold(Decimal::ZERO, |acc, w| acc + w)
+    }
+
+    pub fn contradiction_edges(&self) -> Vec<(AtomId, AtomId, Decimal)> {
+        self.graph
+            .edge_indices()
+            .filter_map(|edge| {
+                let rel = self.graph.edge_weight(edge)?;
+                if rel.relation_type == RelationType::Contradicts {
+                    Some((rel.src, rel.dst, rel.weight.get()))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 

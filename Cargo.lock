@@ -124,6 +124,7 @@ name = "dcma-activation"
 version = "0.1.0"
 dependencies = [
  "dcma-core",
+ "petgraph",
  "rust_decimal",
  "serde",
  "thiserror",

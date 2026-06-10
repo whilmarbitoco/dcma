@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 dcma-core = { path = "../dcma-core" }
+petgraph = "0.7"
 rust_decimal = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
