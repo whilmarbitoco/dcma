@@ -444,6 +444,7 @@ pub enum RelationType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineConfig {
+    // Activation parameters
     pub eta_d: LearningRate,
     pub eta_r: LearningRate,
     pub eta_c: LearningRate,
@@ -452,18 +453,27 @@ pub struct EngineConfig {
     pub reinforcement_window: usize,
     pub convergence_threshold: Activation,
     pub max_iterations: usize,
+    // Contradiction parameters
+    pub eta_p: LearningRate,
+    pub eta_pressure_decay: LearningRate,
     pub equilibrium_threshold: Pressure,
+    pub equilibrium_rate_threshold: Pressure,
     pub equilibrium_window: usize,
     pub resolution_threshold: Pressure,
+    // Consolidation parameters
     pub crystallization_threshold: usize,
     pub stability_threshold: Activation,
+    // Entropy parameters
     pub entropy_min: Activation,
     pub entropy_max: Activation,
     pub dead_node_threshold: Activation,
     pub dead_node_window: usize,
+    // Spontaneous activation
     pub spontaneous_activation_prob: Activation,
+    // Topology parameters
     pub max_motif_size: usize,
     pub max_abstraction_depth: usize,
+    // Retrieval parameters
     pub beam_width: usize,
     pub max_retrieval_depth: usize,
     pub max_subgraph_size: usize,
@@ -480,7 +490,11 @@ impl Default for EngineConfig {
             reinforcement_window: 10,
             convergence_threshold: Activation::new(Decimal::from_str_exact("0.000001").unwrap()),
             max_iterations: 100,
+            // Contradiction defaults (spec Section 5)
+            eta_p: LearningRate::new(Decimal::from_str_exact("0.1").unwrap()),
+            eta_pressure_decay: LearningRate::new(Decimal::from_str_exact("0.05").unwrap()),
             equilibrium_threshold: Pressure::new(Decimal::from_str_exact("0.05").unwrap()),
+            equilibrium_rate_threshold: Pressure::new(Decimal::from_str_exact("0.01").unwrap()),
             equilibrium_window: 100,
             resolution_threshold: Pressure::new(Decimal::from_str_exact("0.95").unwrap()),
             crystallization_threshold: 5,
