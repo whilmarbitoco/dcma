@@ -1,0 +1,10 @@
+[package]
+name = "dcma-distributed"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dcma-core = { path = "../dcma-core" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"

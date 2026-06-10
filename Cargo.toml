@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "crates/dcma-core",
+    "crates/dcma-activation",
+    "crates/dcma-retrieval",
+    "crates/dcma-contradiction",
+    "crates/dcma-entropy",
+    "crates/dcma-consolidation",
+    "crates/dcma-topology",
+    "crates/dcma-runtime",
+    "crates/dcma-distributed",
+]
+resolver = "2"

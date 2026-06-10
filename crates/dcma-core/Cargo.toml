@@ -1,0 +1,13 @@
+[package]
+name = "dcma-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+petgraph = "0.7"
+uuid = { version = "1", features = ["v4", "serde"] }
+rust_decimal = { version = "1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
