@@ -12,5 +12,6 @@ members = [
     "crates/dcma-storage",
     "crates/dcma-api",
     "crates/dcma-cli",
+    "crates/dcma-pg",
 ]
 resolver = "2"

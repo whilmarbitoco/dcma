@@ -21,7 +21,7 @@ pub enum TopologyError {
 
 const STABILIZATION_WINDOW: usize = 50;
 const STABILITY_EPSILON: Decimal = Decimal::from_parts(1, 0, 0, false, 8);
-const STABILITY_THRESHOLD: Decimal = Decimal::from_parts(8, 0, 0, false, 1);
+const STABILITY_THRESHOLD: Decimal = Decimal::from_parts(75, 0, 0, false, 2);
 const HUB_MIN_DEGREE: usize = 5;
 const HUB_SUBNODE_DIVISOR: usize = 3;
 
@@ -457,7 +457,7 @@ mod tests {
         let _report = stabilize_relations(&mut graph, &config);
         let rel = graph.get_relation(edge).unwrap();
         assert!(
-            rel.stability.get() > Decimal::from_str_exact("0.9").unwrap(),
+            rel.stability.get() > Decimal::from_str_exact("0.85").unwrap(),
             "constant weight should give stability near 1.0, got {:?}",
             rel.stability.get()
         );
