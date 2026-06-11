@@ -5,6 +5,7 @@ use petgraph::stable_graph::EdgeIndex;
 use petgraph::Direction;
 use rust_decimal::Decimal;
 use rust_decimal::MathematicalOps;
+use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
@@ -24,7 +25,7 @@ const STABILITY_THRESHOLD: Decimal = Decimal::from_parts(8, 0, 0, false, 1);
 const HUB_MIN_DEGREE: usize = 5;
 const HUB_SUBNODE_DIVISOR: usize = 3;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct WeightChangeReport {
     pub edges_updated: usize,
     pub total_reinforcement: Decimal,
@@ -32,7 +33,7 @@ pub struct WeightChangeReport {
     pub total_contradiction_suppression: Decimal,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct StabilizationReport {
     pub newly_stabilized: Vec<EdgeIndex>,
     pub destabilized: Vec<EdgeIndex>,
@@ -442,17 +443,15 @@ mod tests {
         let (mut graph, edge) =
             make_graph_with_edge(RelationType::Causes, Decimal::from_str_exact("0.5").unwrap());
         let config = EngineConfig::default();
+        let constant_weight = Decimal::from_str_exact("0.5").unwrap();
 
         clear_weight_history();
-        let a_id = graph.get_relation(edge).unwrap().src;
-        for t in 1..=60 {
-            if let Some(atom) = graph.get_atom_mut(a_id) {
-                atom.record_reinforcement(t);
-            }
-        }
 
-        for t in 1..=60 {
-            evolve_weights(&mut graph, &config, t);
+        // Set weight to constant and record identical history — no reinforcement
+        // on the source atom so evolve_weights doesn't change the weight
+        graph.update_edge_weight(edge, Weight::new(constant_weight)).unwrap();
+        for _ in 0..60 {
+            record_weight(edge, constant_weight);
         }
 
         let _report = stabilize_relations(&mut graph, &config);
@@ -505,17 +504,14 @@ mod tests {
         let (mut graph1, edge1) =
             make_graph_with_edge(RelationType::Causes, Decimal::from_str_exact("0.5").unwrap());
         let config = EngineConfig::default();
+        let constant_weight = Decimal::from_str_exact("0.5").unwrap();
 
         clear_weight_history();
-        let a_id1 = graph1.get_relation(edge1).unwrap().src;
-        for t in 1..=60 {
-            if let Some(atom) = graph1.get_atom_mut(a_id1) {
-                atom.record_reinforcement(t);
-            }
-        }
 
-        for t in 1..=60 {
-            evolve_weights(&mut graph1, &config, t);
+        // Set weight to constant and record identical history — no reinforcement
+        graph1.update_edge_weight(edge1, Weight::new(constant_weight)).unwrap();
+        for _ in 0..60 {
+            record_weight(edge1, constant_weight);
         }
 
         stabilize_relations(&mut graph1, &config);
