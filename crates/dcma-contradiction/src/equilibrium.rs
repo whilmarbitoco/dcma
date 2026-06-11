@@ -20,7 +20,8 @@ impl EquilibriumTracker {
     }
 
     /// Record a pressure delta for a contradiction pair
-    pub fn record(&mut self, a: AtomId, b: AtomId, delta: Decimal) {
+    pub fn record(&mut self,         a: AtomId,
+        b: AtomId, delta: Decimal) {
         self.history
             .entry((a, b))
             .or_default()
@@ -57,8 +58,8 @@ impl EquilibriumTracker {
     /// Check if resolved (pressure exceeds resolution threshold)
     pub fn is_resolved(
         &self,
-        a: AtomId,
-        b: AtomId,
+        _a: AtomId,
+        _b: AtomId,
         current_pressure: Pressure,
         config: &EngineConfig,
     ) -> bool {

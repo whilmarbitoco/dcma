@@ -1,7 +1,6 @@
 use dcma_core::types::*;
 use dcma_core::graph::CognitiveGraph;
 use rust_decimal::Decimal;
-use std::collections::HashMap;
 
 /// Shannon entropy over the degree distribution of a cognitive graph.
 /// H(G) = -Σ P(d) * log2(P(d))
@@ -128,7 +127,7 @@ impl EntropyRegulator {
 
                 let hub_threshold = Decimal::from(5) * avg_degree;
                 let mut hubs_found = 0;
-                for (idx, atom) in graph.atoms() {
+                for (_, atom) in graph.atoms() {
                     let deg = graph.degree(atom.id);
                     if Decimal::from(deg) > hub_threshold && deg > 5 {
                         hubs_found += 1;
@@ -140,7 +139,7 @@ impl EntropyRegulator {
 
                 // Strategy 2: Check for dead paths
                 let mut dead_found = 0;
-                for (idx, atom) in graph.atoms() {
+                for (_, atom) in graph.atoms() {
                     if atom.state == AtomState::Active {
                         // A node is "dead" if it has zero degree and low salience
                         let in_deg = graph.in_degree(atom.id);

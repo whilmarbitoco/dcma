@@ -1,7 +1,6 @@
 use dcma_core::types::*;
 use dcma_core::graph::CognitiveGraph;
 use dcma_core::atom::CognitiveAtom;
-use dcma_core::relation::Relation;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use rust_decimal::prelude::ToPrimitive;

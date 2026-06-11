@@ -16,7 +16,7 @@ pub struct ConvergenceInfo {
 
 /// Check convergence criterion per spec Theorem 3.2.
 /// Returns true if the activation dynamics have reached a fixed point.
-pub fn check_convergence(prev_diff: Decimal, current_diff: Decimal, config: &EngineConfig) -> ConvergenceInfo {
+pub fn check_convergence(_prev_diff: Decimal, current_diff: Decimal, config: &EngineConfig) -> ConvergenceInfo {
     let threshold = config.convergence_threshold.get();
     let converged = current_diff < threshold;
     

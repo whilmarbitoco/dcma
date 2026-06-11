@@ -420,6 +420,7 @@ pub enum RelationType {
     Specializes,
     Generalizes,
     Contains,
+    AbstractionOf,
     // Logical
     Implies,
     Negates,

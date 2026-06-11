@@ -157,15 +157,15 @@ mod tests {
             AtomType::Entity,
             "roundtrip".to_string(),
         );
-        let id = atom.id;
+        let atom_id = atom.id;
         state.graph.add_atom(atom);
 
         let json = state.to_json().unwrap();
         let restored = CognitiveState::from_json(&json).unwrap();
-        assert_eq!(restored.atom_count(), 1);
+        assert_eq!(restored.graph.atom_count(), 1);
         // Note: activations are #[serde(skip)] — they're ephemeral runtime state
         // Graph structure (atoms + relations) is what persists
-        assert!(restored.graph.get_atom(id).is_some());
+        assert!(restored.graph.get_atom(atom_id).is_some());
     }
 
     #[test]
@@ -182,7 +182,7 @@ mod tests {
             AtomType::Concept,
             "bad".to_string(),
         );
-        let id = atom.id;
+        let _id = atom.id;
         let idx = state.graph.add_atom(atom);
         // Manually insert an out-of-range activation
         state.activations.insert(
@@ -196,12 +196,3 @@ mod tests {
     }
 }
 
-// Helper extension for test
-trait AtomCount {
-    fn atom_count(&self) -> usize;
-}
-impl AtomCount for CognitiveState {
-    fn atom_count(&self) -> usize {
-        self.graph.atom_count()
-    }
-}

@@ -181,13 +181,13 @@ mod tests {
 
     #[test]
     fn test_new_structure_empty() {
-        let mut cs = ContradictionStructure::new();
+        let cs = ContradictionStructure::new();
         assert!(cs.is_empty());
     }
 
     #[test]
     fn test_set_and_get_pressure() {
-        let mut cs = ContradictionStructure::new();
+        let mut cs = ContradictionStructure::new(); // mut needed for set()
         let a = AtomId::new();
         let b = AtomId::new();
         let p = Pressure::new(Decimal::from_str_exact("0.5").unwrap());

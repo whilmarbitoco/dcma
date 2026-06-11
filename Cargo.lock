@@ -136,6 +136,7 @@ name = "dcma-consolidation"
 version = "0.1.0"
 dependencies = [
  "dcma-core",
+ "petgraph",
  "rust_decimal",
  "serde",
  "thiserror",
@@ -224,6 +225,7 @@ version = "0.1.0"
 dependencies = [
  "dcma-contradiction",
  "dcma-core",
+ "petgraph",
  "rust_decimal",
  "serde",
  "thiserror",
