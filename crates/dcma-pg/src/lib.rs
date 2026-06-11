@@ -3,4 +3,4 @@ pub mod storage;
 pub mod schema;
 
 pub use error::PgError;
-pub use storage::PgStorage;
+pub use storage::{PgStorage, StorageStats};

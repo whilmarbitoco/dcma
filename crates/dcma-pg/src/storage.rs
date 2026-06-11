@@ -88,7 +88,7 @@ impl PgStorage {
 }
 
 impl PgStorage {
-    async fn save_state(&self, state: &CognitiveState) -> Result<(), PgError> {
+    pub async fn save_state(&self, state: &CognitiveState) -> Result<(), PgError> {
         let mut tx = self.pool.begin().await?;
 
         // Upsert all atoms
@@ -194,7 +194,7 @@ impl PgStorage {
         Ok(())
     }
 
-    async fn load_state(&self) -> Result<CognitiveState, PgError> {
+    pub async fn load_state(&self) -> Result<CognitiveState, PgError> {
         // Load config or create default
         let config = EngineConfig::default();
 
@@ -384,7 +384,7 @@ impl PgStorage {
         Ok(())
     }
 
-    async fn search_atoms(&self, query: &str, limit: i64) -> Result<Vec<AtomId>, PgError> {
+    pub async fn search_atoms(&self, query: &str, limit: i64) -> Result<Vec<AtomId>, PgError> {
         let rows = sqlx::query_as::<_, (Uuid,)>(
             r#"
             SELECT id FROM dcma_atoms
@@ -403,7 +403,7 @@ impl PgStorage {
         Ok(rows.into_iter().map(|r| AtomId(r.0)).collect())
     }
 
-    async fn get_stats(&self) -> Result<StorageStats, PgError> {
+    pub async fn get_stats(&self) -> Result<StorageStats, PgError> {
         let atom_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM dcma_atoms")
             .fetch_one(&self.pool)
             .await?;

@@ -642,12 +642,15 @@ dependencies = [
  "dcma-contradiction",
  "dcma-core",
  "dcma-entropy",
+ "dcma-pg",
  "dcma-retrieval",
  "dcma-topology",
  "rust_decimal",
  "serde",
  "serde_json",
+ "serial_test",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 

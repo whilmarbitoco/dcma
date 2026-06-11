@@ -1,7 +1,7 @@
 [package]
 name = "dcma-runtime"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 dcma-core = { path = "../dcma-core" }
@@ -15,6 +15,9 @@ rust_decimal = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tracing = "0.1"
+dcma-pg = { path = "../dcma-pg" }
 
 [dev-dependencies]
 serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+serial_test = "3"
