@@ -1,13 +1,14 @@
 use dcma_core::types::Activation;
 use dcma_core::types::EngineConfig;
 use rust_decimal::Decimal;
+use serde::Serialize;
 /// Convergence: max_i |A_i(t+1) - A_i(t)| < ε
 pub fn has_converged(max_diff: Decimal, threshold: Activation) -> bool {
     max_diff < threshold.get()
 }
 
 /// Convergence info after activation propagation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ConvergenceInfo {
     pub converged: bool,
     pub iterations: usize,

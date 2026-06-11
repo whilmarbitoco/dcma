@@ -3,9 +3,10 @@ use dcma_consolidation::crystallization::CrystallizationReport;
 use dcma_core::types::*;
 use dcma_entropy::entropy::EntropyStatus;
 use dcma_topology::edge::{StabilizationReport, WeightChangeReport};
+use serde::Serialize;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TickResult {
     pub tick: u64,
     pub convergence: ConvergenceInfo,
@@ -18,7 +19,7 @@ pub struct TickResult {
     pub activations: HashMap<AtomId, Activation>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Stimulus {
     pub source_nodes: Vec<AtomId>,
     pub query_context: Vec<AtomId>,

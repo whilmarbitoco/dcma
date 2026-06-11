@@ -1,12 +1,13 @@
 use dcma_core::graph::CognitiveGraph;
 use dcma_core::types::*;
 use crate::relevance::{relevance, relevance_with_contradiction, compute_contradiction_flags};
+use serde::{Deserialize, Serialize};
 
 use petgraph::stable_graph::NodeIndex;
 use rust_decimal::Decimal;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CognitiveField {
     pub nodes: Vec<AtomId>,
     pub relevance_score: Decimal,
@@ -16,7 +17,7 @@ pub struct CognitiveField {
     pub metadata: RetrievalMetadata,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetrievalMetadata {
     pub traversal_depth: usize,
     pub beam_width_used: usize,

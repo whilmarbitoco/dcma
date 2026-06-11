@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 dcma-core = { path = "../dcma-core" }
 dcma-contradiction = { path = "../dcma-contradiction" }
-petgraph = "0.7"
+petgraph = { version = "0.7", features = ["serde-1"] }
 rust_decimal = { version = "1", features = ["serde", "maths"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"

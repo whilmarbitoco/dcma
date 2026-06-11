@@ -3,6 +3,7 @@ use dcma_core::atom::CognitiveAtom;
 use dcma_core::graph::CognitiveGraph;
 use dcma_core::types::*;
 use rust_decimal::Decimal;
+use serde::Serialize;
 
 #[derive(Debug, Clone)]
 pub struct CrystallizationResult {
@@ -11,7 +12,7 @@ pub struct CrystallizationResult {
     pub report: CrystallizationReport,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CrystallizationReport {
     pub motifs_checked: usize,
     pub motifs_crystallized: usize,

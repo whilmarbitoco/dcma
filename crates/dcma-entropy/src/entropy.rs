@@ -1,6 +1,7 @@
 use dcma_core::types::*;
 use dcma_core::graph::CognitiveGraph;
 use rust_decimal::Decimal;
+use serde::Serialize;
 
 /// Shannon entropy over the degree distribution of a cognitive graph.
 /// H(G) = -Σ P(d) * log2(P(d))
@@ -173,7 +174,7 @@ impl EntropyRegulator {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum EntropyStatus {
     TooLow(Decimal),
     Normal(Decimal),
