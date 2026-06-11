@@ -1,0 +1,16 @@
+[package]
+name = "dcma-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dcma-core = { path = "../dcma-core" }
+dcma-runtime = { path = "../dcma-runtime" }
+dcma-storage = { path = "../dcma-storage" }
+dcma-api = { path = "../dcma-api" }
+dcma-retrieval = { path = "../dcma-retrieval" }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+uuid = { version = "1", features = ["v4"] }

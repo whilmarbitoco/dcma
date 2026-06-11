@@ -9,5 +9,8 @@ members = [
     "crates/dcma-topology",
     "crates/dcma-runtime",
     "crates/dcma-distributed",
+    "crates/dcma-storage",
+    "crates/dcma-api",
+    "crates/dcma-cli",
 ]
 resolver = "2"
