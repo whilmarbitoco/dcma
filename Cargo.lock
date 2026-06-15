@@ -675,6 +675,7 @@ dependencies = [
  "petgraph",
  "rust_decimal",
  "serde",
+ "serial_test",
  "thiserror 2.0.18",
  "tracing",
 ]

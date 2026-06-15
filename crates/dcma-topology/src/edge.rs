@@ -331,6 +331,7 @@ pub fn split_hubs(
 mod tests {
     use super::*;
     use dcma_core::atom::CognitiveAtom;
+    use serial_test::serial;
 
     fn make_graph_with_edge(
         rel_type: RelationType,
@@ -371,6 +372,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_weight_reinforce() {
         let (mut graph, edge) =
             make_graph_with_edge(RelationType::Causes, Decimal::from_str_exact("0.5").unwrap());
@@ -388,6 +390,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_weight_decay() {
         let (mut graph, edge) =
             make_graph_with_edge(RelationType::Causes, Decimal::from_str_exact("0.5").unwrap());
@@ -401,6 +404,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_weight_clamped() {
         let (mut graph, edge) =
             make_graph_with_edge(RelationType::Causes, Decimal::from_str_exact("0.5").unwrap());
@@ -439,6 +443,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_stability_constant() {
         let (mut graph, edge) =
             make_graph_with_edge(RelationType::Causes, Decimal::from_str_exact("0.5").unwrap());
@@ -464,6 +469,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_stability_varying() {
         let (mut graph, _edge) =
             make_graph_with_edge(RelationType::Causes, Decimal::from_str_exact("0.5").unwrap());
@@ -500,6 +506,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_stability_threshold() {
         let (mut graph1, edge1) =
             make_graph_with_edge(RelationType::Causes, Decimal::from_str_exact("0.5").unwrap());
@@ -585,6 +592,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_evolve_deterministic() {
         clear_weight_history();
         let config = EngineConfig::default();

@@ -3,6 +3,9 @@ name = "dcma-topology"
 version = "0.1.0"
 edition = "2024"
 
+[dev-dependencies]
+serial_test = "3"
+
 [dependencies]
 dcma-core = { path = "../dcma-core" }
 dcma-contradiction = { path = "../dcma-contradiction" }
