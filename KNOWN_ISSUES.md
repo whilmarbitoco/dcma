@@ -17,11 +17,11 @@ All 185 tests pass across 12 crates. The CLI, API, and PostgreSQL persistence al
 - No NLP pipeline to extract entities, concepts, or relations from raw text
 - **Impact:** The engine has no way to learn or build knowledge automatically
 
-### 2. No Embedding / Semantic Layer
-- Retrieval engine does graph traversal only — no vector embeddings
-- No semantic similarity search (can't find "similar concepts")
-- No way to map natural language queries to existing atoms
-- **Impact:** The `query` endpoint only works with known AtomIds, not natural language
+### 2. No Natural Language Interface
+- Retrieval engine uses graph traversal (beam search) over symbolic atoms — by design, no vector embeddings
+- However, there's no way to map natural language input to existing atoms in the graph
+- No entity extraction, no text-to-atom mapping, no way to query in plain English
+- **Impact:** Users must know exact AtomIds to query; no "search by meaning" capability
 
 ### 3. No Contradiction Detection on Real Data
 - Contradiction engine works mathematically (pressure dynamics, equilibrium)
