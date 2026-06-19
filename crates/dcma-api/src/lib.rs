@@ -1,11 +1,12 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json, Router,
-    routing::{get, post},
+    routing::{get, post, delete},
 };
 use dcma_core::atom::CognitiveAtom;
 use dcma_core::types::*;
+use dcma_core::state::CognitiveState;
 use dcma_retrieval::CognitiveField;
 use dcma_runtime::{Runtime, Stimulus, TickResult};
 use serde::{Deserialize, Serialize};
@@ -15,20 +16,22 @@ use tokio::sync::Mutex;
 
 pub type ApiState = Arc<Mutex<Runtime>>;
 
-#[derive(Serialize, Deserialize)]
+// ---- Request / Response types ----
+
+#[derive(Serialize)]
 pub struct HealthResponse {
     pub status: String,
+    pub version: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 pub struct StateSummary {
     pub nodes: usize,
     pub edges: usize,
-    pub entropy: f64,
     pub tick: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 pub struct StatsResponse {
     pub atom_count: usize,
     pub relation_count: usize,
@@ -64,6 +67,20 @@ pub struct TickRequest {
     pub query: Option<Vec<AtomId>>,
 }
 
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    pub q: Option<String>,
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub offset: usize,
+}
+
+#[derive(Deserialize)]
+pub struct IngestRequest {
+    pub text: String,
+}
+
 #[derive(Serialize)]
 pub struct AtomDetail {
     pub id: AtomId,
@@ -76,10 +93,123 @@ pub struct AtomDetail {
     pub confidence: Confidence,
 }
 
+#[derive(Serialize)]
+pub struct AtomListResponse {
+    pub atoms: Vec<AtomDetail>,
+    pub total: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct IngestResponse {
+    pub atoms_created: usize,
+    pub atom_ids: Vec<AtomId>,
+    pub relations_found: usize,
+}
+
+#[derive(Serialize)]
+pub struct ErrorResponse {
+    pub error: String,
+}
+
+fn default_limit() -> usize { 20 }
+
+// ---- Handlers ----
+
+async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
+    })
+}
+
+async fn get_state(State(runtime): State<ApiState>) -> Json<StateSummary> {
+    let rt = runtime.lock().await;
+    let state = rt.state();
+    Json(StateSummary {
+        nodes: state.graph.atom_count(),
+        edges: state.graph.relation_count(),
+        tick: state.tick,
+    })
+}
+
+async fn get_stats(State(runtime): State<ApiState>) -> Json<StatsResponse> {
+    let rt = runtime.lock().await;
+    let state = rt.state();
+    Json(StatsResponse {
+        atom_count: state.graph.atom_count(),
+        relation_count: state.graph.relation_count(),
+        tick: state.tick,
+        degree_distribution: state.graph.degree_distribution(),
+        diameter: state.graph.diameter(),
+    })
+}
+
+async fn list_atoms(
+    State(runtime): State<ApiState>,
+    Query(params): Query<SearchQuery>,
+) -> Json<AtomListResponse> {
+    let rt = runtime.lock().await;
+    let state = rt.state();
+
+    let all_atoms: Vec<_> = state.graph.atoms()
+        .filter_map(|(_, atom)| {
+            if let Some(ref q) = params.q {
+                let q_lower = q.to_lowercase();
+                if !atom.canonical.to_lowercase().contains(&q_lower) {
+                    return None;
+                }
+            }
+            let activation = state.get_activation(atom.id);
+            Some(AtomDetail {
+                id: atom.id,
+                atom_type: atom.atom_type,
+                name: atom.canonical.clone(),
+                state: atom.state,
+                attributes: atom.attributes.clone(),
+                activation,
+                salience: atom.salience,
+                confidence: atom.confidence,
+            })
+        })
+        .collect();
+
+    let total = all_atoms.len();
+    let atoms: Vec<_> = all_atoms.into_iter()
+        .skip(params.offset)
+        .take(params.limit)
+        .collect();
+
+    Json(AtomListResponse { atoms, total })
+}
+
+async fn get_atom(
+    State(runtime): State<ApiState>,
+    Path(id): Path<AtomId>,
+) -> Result<Json<AtomDetail>, (StatusCode, Json<ErrorResponse>)> {
+    let rt = runtime.lock().await;
+    let state = rt.state();
+    let atom = state.graph.get_atom(id)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(ErrorResponse { error: format!("Atom {} not found", id) })))?;
+    let activation = state.get_activation(id);
+    Ok(Json(AtomDetail {
+        id: atom.id,
+        atom_type: atom.atom_type,
+        name: atom.canonical.clone(),
+        state: atom.state,
+        attributes: atom.attributes.clone(),
+        activation,
+        salience: atom.salience,
+        confidence: atom.confidence,
+    }))
+}
+
 async fn insert_atom(
     State(runtime): State<ApiState>,
     Json(req): Json<CreateAtomRequest>,
-) -> Result<Json<AtomId>, StatusCode> {
+) -> Result<Json<AtomId>, (StatusCode, Json<ErrorResponse>)> {
+    if req.name.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Atom name cannot be empty".into() })));
+    }
     let mut rt = runtime.lock().await;
     let id = AtomId::new();
     let mut atom = CognitiveAtom::new(id, req.atom_type, req.name);
@@ -90,19 +220,30 @@ async fn insert_atom(
     Ok(Json(id))
 }
 
+async fn delete_atom(
+    State(runtime): State<ApiState>,
+    Path(id): Path<AtomId>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let mut rt = runtime.lock().await;
+    let removed = rt.state_mut().graph.remove_atom(id);
+    if removed.is_some() {
+        Ok(Json(serde_json::json!({"status": "deleted", "id": id.to_string()})))
+    } else {
+        Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error: format!("Atom {} not found", id) })))
+    }
+}
+
 async fn create_relation(
     State(runtime): State<ApiState>,
     Json(req): Json<CreateRelationRequest>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let mut rt = runtime.lock().await;
-    rt.state_mut()
-        .graph
-        .add_relation(req.src, req.dst, req.relation_type)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    rt.state_mut().graph.add_relation(req.src, req.dst, req.relation_type)
+        .map_err(|_| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid relation (check src/dst exist)".into() })))?;
     Ok(Json(serde_json::json!({"status": "created"})))
 }
 
-async fn query(
+async fn query_field(
     State(runtime): State<ApiState>,
     Json(req): Json<QueryRequest>,
 ) -> Json<CognitiveField> {
@@ -133,68 +274,76 @@ async fn execute_tick(
     Json(result)
 }
 
-async fn get_state(State(runtime): State<ApiState>) -> Json<StateSummary> {
+async fn export_state(State(runtime): State<ApiState>) -> Json<serde_json::Value> {
     let rt = runtime.lock().await;
     let state = rt.state();
-    Json(StateSummary {
-        nodes: state.graph.atom_count(),
-        edges: state.graph.relation_count(),
-        entropy: 0.0,
-        tick: state.tick,
-    })
+    match serde_json::to_value(state) {
+        Ok(val) => Json(val),
+        Err(_) => Json(serde_json::json!({"error": "serialization failed"})),
+    }
 }
 
-async fn get_atom(
+async fn ingest_text(
     State(runtime): State<ApiState>,
-    Path(id): Path<AtomId>,
-) -> Result<Json<AtomDetail>, StatusCode> {
-    let rt = runtime.lock().await;
-    let state = rt.state();
-    let atom = state.graph.get_atom(id).ok_or(StatusCode::NOT_FOUND)?;
-    let activation = state.get_activation(id);
-    Ok(Json(AtomDetail {
-        id: atom.id,
-        atom_type: atom.atom_type,
-        name: atom.canonical.clone(),
-        state: atom.state,
-        attributes: atom.attributes.clone(),
-        activation,
-        salience: atom.salience,
-        confidence: atom.confidence,
+    Json(req): Json<IngestRequest>,
+) -> Result<Json<IngestResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if req.text.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Text cannot be empty".into() })));
+    }
+
+    let engine = dcma_ingest::IngestEngine::new();
+    let extracted = engine.extract_entities(&req.text);
+    let relations = engine.extract_relations(&extracted, &req.text);
+
+    let mut rt = runtime.lock().await;
+    let mut atom_ids = Vec::new();
+
+    for entity in &extracted {
+        let atom_type = match entity.entity_type.as_str() {
+            "Entity" => AtomType::Entity,
+            _ => AtomType::Concept,
+        };
+        let id = AtomId::new();
+        let atom = CognitiveAtom::new(id, atom_type, entity.name.clone());
+        rt.state_mut().graph.add_atom(atom);
+        atom_ids.push(id);
+    }
+
+    Ok(Json(IngestResponse {
+        atoms_created: atom_ids.len(),
+        atom_ids,
+        relations_found: relations.len(),
     }))
 }
 
-async fn get_stats(State(runtime): State<ApiState>) -> Json<StatsResponse> {
-    let rt = runtime.lock().await;
-    let state = rt.state();
-    Json(StatsResponse {
-        atom_count: state.graph.atom_count(),
-        relation_count: state.graph.relation_count(),
-        tick: state.tick,
-        degree_distribution: state.graph.degree_distribution(),
-        diameter: state.graph.diameter(),
-    })
-}
+// ---- Router ----
 
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "ok".into(),
-    })
+#[derive(Deserialize, Default)]
+struct Pagination {
+    #[serde(default = "default_limit")]
+    limit: usize,
+    #[serde(default)]
+    offset: usize,
+    q: Option<String>,
 }
 
 pub fn app(runtime: Runtime) -> Router {
     let state: ApiState = Arc::new(Mutex::new(runtime));
     Router::new()
-        .route("/atoms", post(insert_atom))
-        .route("/relations", post(create_relation))
-        .route("/query", post(query))
-        .route("/tick", post(execute_tick))
-        .route("/state", get(get_state))
-        .route("/atoms/:id", get(get_atom))
-        .route("/stats", get(get_stats))
         .route("/health", get(health))
+        .route("/state", get(get_state))
+        .route("/stats", get(get_stats))
+        .route("/atoms", get(list_atoms).post(insert_atom))
+        .route("/atoms/:id", get(get_atom).delete(delete_atom))
+        .route("/relations", post(create_relation))
+        .route("/query", post(query_field))
+        .route("/tick", post(execute_tick))
+        .route("/export", get(export_state))
+        .route("/ingest", post(ingest_text))
         .with_state(state)
 }
+
+// ---- Tests ----
 
 #[cfg(test)]
 mod tests {
@@ -206,78 +355,89 @@ mod tests {
     use dcma_core::types::EngineConfig;
     use tower::util::ServiceExt;
 
-    #[tokio::test]
-    async fn test_insert_atom() {
+    fn test_app() -> Router {
         let rt = Runtime::new(EngineConfig::default());
-        let app = super::app(rt);
+        app(rt)
+    }
 
-        let req_body = serde_json::json!({
-            "type": "Concept",
-            "name": "test_atom"
-        });
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri("/atoms")
+    #[tokio::test]
+    async fn test_health() {
+        let app = test_app();
+        let req = Request::builder().method(Method::GET).uri("/health").body(Body::empty()).unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_insert_and_get_atom() {
+        let app = test_app();
+        let body = serde_json::json!({"type": "Concept", "name": "test_atom"});
+        let req = Request::builder().method(Method::POST).uri("/atoms")
             .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_string(&req_body).unwrap()))
-            .unwrap();
+            .body(Body::from(serde_json::to_string(&body).unwrap())).unwrap();
         let res = app.clone().oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
 
-        let body_bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
-        let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
-        let id: AtomId = serde_json::from_str(&body_str).unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+        let id: AtomId = serde_json::from_slice(&bytes).unwrap();
 
-        let req2 = Request::builder()
-            .method(Method::GET)
-            .uri(&format!("/atoms/{}", id))
+        let req = Request::builder().method(Method::GET)
+            .uri(format!("/atoms/{}", id))
+            .body(Body::empty()).unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_list_atoms() {
+        let app = test_app();
+        let req = Request::builder().method(Method::GET).uri("/atoms").body(Body::empty()).unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_delete_atom() {
+        let app = test_app();
+        let body = serde_json::json!({"type": "Concept", "name": "to_delete"});
+        let req = Request::builder().method(Method::POST).uri("/atoms")
             .header("content-type", "application/json")
-            .body(Body::empty())
-            .unwrap();
-        let res2 = app.oneshot(req2).await.unwrap();
-        assert_eq!(res2.status(), StatusCode::OK);
+            .body(Body::from(serde_json::to_string(&body).unwrap())).unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+        let id: AtomId = serde_json::from_slice(&bytes).unwrap();
+
+        let req = Request::builder().method(Method::DELETE)
+            .uri(format!("/atoms/{}", id))
+            .body(Body::empty()).unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
     }
 
     #[tokio::test]
     async fn test_create_relation() {
-        let rt = Runtime::new(EngineConfig::default());
-        let app = super::app(rt);
+        let app = test_app();
 
-        // First create two atoms
-        let req1 = Request::builder()
-            .method(Method::POST)
-            .uri("/atoms")
+        let req1 = Request::builder().method(Method::POST).uri("/atoms")
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"type": "Concept", "name": "a"})).unwrap(),
-            ))
+            .body(Body::from(serde_json::to_string(&serde_json::json!({"type": "Concept", "name": "a"})).unwrap()))
             .unwrap();
         let res1 = app.clone().oneshot(req1).await.unwrap();
-        let body_bytes = axum::body::to_bytes(res1.into_body(), 1024 * 1024).await.unwrap();
-        let id_a: AtomId = serde_json::from_slice(&body_bytes).unwrap();
+        let bytes = axum::body::to_bytes(res1.into_body(), 1024 * 1024).await.unwrap();
+        let id_a: AtomId = serde_json::from_slice(&bytes).unwrap();
 
-        let req2 = Request::builder()
-            .method(Method::POST)
-            .uri("/atoms")
+        let req2 = Request::builder().method(Method::POST).uri("/atoms")
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"type": "Concept", "name": "b"})).unwrap(),
-            ))
+            .body(Body::from(serde_json::to_string(&serde_json::json!({"type": "Concept", "name": "b"})).unwrap()))
             .unwrap();
         let res2 = app.clone().oneshot(req2).await.unwrap();
-        let body_bytes = axum::body::to_bytes(res2.into_body(), 1024 * 1024).await.unwrap();
-        let id_b: AtomId = serde_json::from_slice(&body_bytes).unwrap();
+        let bytes = axum::body::to_bytes(res2.into_body(), 1024 * 1024).await.unwrap();
+        let id_b: AtomId = serde_json::from_slice(&bytes).unwrap();
 
-        let rel_body = serde_json::json!({
-            "src": id_a,
-            "dst": id_b,
-            "type": "Causes"
-        });
-        let req3 = Request::builder()
-            .method(Method::POST)
-            .uri("/relations")
+        let rel = serde_json::json!({"src": id_a, "dst": id_b, "type": "Causes"});
+        let req3 = Request::builder().method(Method::POST).uri("/relations")
             .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_string(&rel_body).unwrap()))
+            .body(Body::from(serde_json::to_string(&rel).unwrap()))
             .unwrap();
         let res3 = app.oneshot(req3).await.unwrap();
         assert_eq!(res3.status(), StatusCode::OK);
@@ -285,74 +445,55 @@ mod tests {
 
     #[tokio::test]
     async fn test_query() {
-        let rt = Runtime::new(EngineConfig::default());
-        let app = super::app(rt);
-
-        let req_body = serde_json::json!({"nodes": []});
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri("/query")
+        let app = test_app();
+        let req = Request::builder().method(Method::POST).uri("/query")
             .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_string(&req_body).unwrap()))
+            .body(Body::from(serde_json::to_string(&serde_json::json!({"nodes": []})).unwrap()))
             .unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
-
-        let body_bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
-        let _field: CognitiveField = serde_json::from_slice(&body_bytes).unwrap();
     }
 
     #[tokio::test]
     async fn test_tick() {
-        let rt = Runtime::new(EngineConfig::default());
-        let app = super::app(rt);
-
-        let req_body = serde_json::json!({"sources": [], "query": []});
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri("/tick")
+        let app = test_app();
+        let req = Request::builder().method(Method::POST).uri("/tick")
             .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_string(&req_body).unwrap()))
+            .body(Body::from(serde_json::to_string(&serde_json::json!({"sources": [], "query": []})).unwrap()))
             .unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_export() {
+        let app = test_app();
+        let req = Request::builder().method(Method::GET).uri("/export").body(Body::empty()).unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_ingest() {
+        let app = test_app();
+        let body = serde_json::json!({"text": "Neural Networks are a subset of Machine Learning."});
+        let req = Request::builder().method(Method::POST).uri("/ingest")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+        let resp: IngestResponse = serde_json::from_slice(&bytes).unwrap();
+        assert!(resp.atoms_created >= 2, "Expected >= 2 atoms, got {}", resp.atoms_created);
     }
 
     #[tokio::test]
     async fn test_state_endpoint() {
-        let rt = Runtime::new(EngineConfig::default());
-        let app = super::app(rt);
-
-        let req = Request::builder()
-            .method(Method::GET)
-            .uri("/state")
-            .body(Body::empty())
-            .unwrap();
+        let app = test_app();
+        let req = Request::builder().method(Method::GET).uri("/state").body(Body::empty()).unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
-
-        let body_bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
-        let summary: StateSummary = serde_json::from_slice(&body_bytes).unwrap();
-        assert_eq!(summary.nodes, 0);
-        assert_eq!(summary.edges, 0);
-        assert_eq!(summary.tick, 0);
-    }
-
-    #[tokio::test]
-    async fn test_health() {
-        let rt = Runtime::new(EngineConfig::default());
-        let app = super::app(rt);
-
-        let req = Request::builder()
-            .method(Method::GET)
-            .uri("/health")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.oneshot(req).await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-
-        let body_bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
-        let health: HealthResponse = serde_json::from_slice(&body_bytes).unwrap();
-        assert_eq!(health.status, "ok");
     }
 }

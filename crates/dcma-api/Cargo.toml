@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dcma-ingest = { path = "../dcma-ingest" }
 dcma-core = { path = "../dcma-core" }
 dcma-runtime = { path = "../dcma-runtime" }
 dcma-storage = { path = "../dcma-storage" }

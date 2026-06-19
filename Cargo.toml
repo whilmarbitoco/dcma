@@ -13,5 +13,6 @@ members = [
     "crates/dcma-api",
     "crates/dcma-cli",
     "crates/dcma-pg",
+    "crates/dcma-ingest",
 ]
 resolver = "2"
