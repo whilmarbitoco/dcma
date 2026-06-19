@@ -18,6 +18,15 @@ tracing = "0.1"
 dcma-pg = { path = "../dcma-pg" }
 
 [dev-dependencies]
+dcma-ingest = { path = "../dcma-ingest" }
+dcma-storage = { path = "../dcma-storage" }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 serial_test = "3"
+tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "dcma_benchmarks"
+path = "benches/dcma_benchmarks.rs"
+harness = false
