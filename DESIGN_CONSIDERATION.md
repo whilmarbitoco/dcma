@@ -87,3 +87,78 @@ If DCMA needs to learn and improve over time, use approaches that **preserve det
 | Design-time optimization | ✅ Good | Keep runtime deterministic |
 
 **Core principle:** DCMA competes on deterministic, verifiable, structured cognition — not on pattern recognition. That's a genuinely valuable niche. Don't dilute it with mechanisms that undermine its foundations.
+
+---
+
+## Update: The Ingest Layer Argument (June 19, 2026)
+
+### The problem this doesn't solve
+
+The current ingest pipeline (dcma-ingest) is shallow. It extracts entities and simple verb-mediated relations from text. Building deep knowledge still requires manual curation or feeding large volumes of text. DCMA has no passive learning — no autonomous absorption of information from documents, web, or data streams.
+
+The original analysis concluded: "backprop is for learning from raw data, DCMA is for structured reasoning." This is correct for the **core**. But it was incomplete — it didn't consider that the **ingest layer** is exactly where statistical learning belongs.
+
+### The hybrid architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                  DCMA Core                       │
+│  (deterministic, formal, symbolic reasoning)     │
+│                                                  │
+│  activation │ retrieval │ contradiction │ entropy│
+│  consolidation │ topology │ runtime              │
+└──────────────────────┬──────────────────────────┘
+                       │ clean atoms/relations
+              ┌────────┴────────┐
+              │   Ingest Layer   │
+              │  (learned,        │
+              │   statistical)    │
+              │                   │
+              │  • entity extract │
+              │  • relation learn │
+              │  • attention      │
+              │  • backprop       │
+              └───────────────────┘
+```
+
+**Two layers with a clean boundary:**
+
+1. **DCMA Core** — stays deterministic, formal, symbolic. No backprop. All proofs hold. Never sees gradients or weight updates.
+2. **Ingest Layer** — learned, statistical, continuous. Uses attention + backprop to get better at extracting structured knowledge from unstructured data.
+
+The ingest layer **feeds** the core. It doesn't **become** the core. The core only receives clean atoms and relations.
+
+### Where backprop belongs: dcma-learn (future crate)
+
+A separate `dcma-learn` crate could implement:
+
+- **Attention** — learned attention weights for retrieval scoring and document comprehension
+- **Extraction** — learned entity/relation extraction from text (replacing/augmenting the regex/heuristic approach in dcma-ingest)
+- **Feedback loop** — uses core signals as training signal:
+  - Did extracted atoms survive contradiction checks?
+  - Did retrieval return useful results using these atoms?
+  - Did consolidation merge them into stable structures?
+- **Adapter** — converts learned output into clean atoms for dcma-core
+
+### What this enables
+
+```bash
+# Current (manual):
+dcma ingest "Neural Networks are a subset of Machine Learning."
+
+# With learned ingest (autonomous):
+dcma learn --from ./textbook.pdf
+dcma learn --from https://en.wikipedia.org/wiki/Neural_network
+dcma learn --from ./research_papers/
+```
+
+The core stays clean and deterministic. The ingest layer gets smarter over time. The boundary is atoms/relations — the core never knows or cares how they were produced.
+
+### Revised verdict
+
+| Layer | Backprop | Attention | Determinism |
+|---|---|---|---|
+| dcma-core | ❌ Never | ✅ Deterministic only | Preserved |
+| dcma-learn | ✅ Yes | ✅ Learned OK | Not required |
+
+The original conclusion — "backprop doesn't belong in DCMA" — was correct for the core. The revision is: **backprop belongs in the ingest layer, as a separate crate with a clean boundary.** This makes DCMA less manual without sacrificing what makes it valuable.
