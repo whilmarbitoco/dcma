@@ -18,6 +18,9 @@ struct Cli {
 
     #[arg(global = true, long, help = "Output as JSON")]
     json: bool,
+
+    #[arg(global = true, long, help = "PostgreSQL connection URL (e.g. postgres://user:pass@host/db)")]
+    pg_url: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -166,10 +169,27 @@ fn load_or_create(path: &PathBuf) -> (Runtime, PathBuf) {
     }
 }
 
-fn save_state(rt: &Runtime, path: &PathBuf) {
-    if let Err(e) = Storage::save_state(rt.state(), path) {
-        eprintln!("Error saving state: {}", e);
-    }
+/// Load state from PostgreSQL or create a new one
+fn load_or_create_pg(url: &str) -> (dcma_runtime::PgRuntime, dcma_pg::PgStorage) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let storage = dcma_pg::PgStorage::connect(url).await
+            .unwrap_or_else(|e| { eprintln!("Error connecting to PostgreSQL: {}", e); std::process::exit(1); });
+        let config = EngineConfig::default();
+        let state = storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(config.clone()));
+        let runtime = dcma_runtime::PgRuntime::with_state_and_storage(config, state, storage.clone());
+        (runtime, storage)
+    })
+}
+
+/// Persist state to PostgreSQL
+fn save_pg(storage: &dcma_pg::PgStorage, state: &CognitiveState) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        if let Err(e) = storage.save_state(state).await {
+            eprintln!("Error saving state to PostgreSQL: {}", e);
+        }
+    });
 }
 
 fn main() {
@@ -177,11 +197,26 @@ fn main() {
 
     match cli.command {
         Commands::Init => {
-            let state = CognitiveState::new(EngineConfig::default());
-            let path = get_state_path(&cli.path);
-            match Storage::save_state(&state, &path) {
-                Ok(_) => println!("Initialized cognitive state at {}", path.display()),
-                Err(e) => eprintln!("Error: {}", e),
+            if let Some(ref url) = cli.pg_url {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    match dcma_pg::PgStorage::connect(url).await {
+                        Ok(storage) => {
+                            storage.migrate().await.unwrap_or_else(|e| eprintln!("Warning: migration: {}", e));
+                            let state = CognitiveState::new(EngineConfig::default());
+                            storage.save_state(&state).await.unwrap_or_else(|e| eprintln!("Error: {}", e));
+                            println!("Initialized cognitive state in PostgreSQL");
+                        }
+                        Err(e) => eprintln!("Error connecting to PostgreSQL: {}", e),
+                    }
+                });
+            } else {
+                let state = CognitiveState::new(EngineConfig::default());
+                let path = get_state_path(&cli.path);
+                match Storage::save_state(&state, &path) {
+                    Ok(_) => println!("Initialized cognitive state at {}", path.display()),
+                    Err(e) => eprintln!("Error: {}", e),
+                }
             }
         }
         Commands::Add { r#type, name } => {
@@ -189,37 +224,79 @@ fn main() {
                 Ok(t) => t,
                 Err(e) => { eprintln!("Error: {}", e); return; }
             };
-            let (mut rt, path) = load_or_create(&cli.path);
-            let id = AtomId::new();
-            let atom = CognitiveAtom::new(id, atom_type, name.clone());
-            rt.state_mut().graph.add_atom(atom);
-            println!("Added atom [{}] {} ({:?})", id, name, atom_type);
-            save_state(&rt, &path);
+            if let Some(ref url) = cli.pg_url {
+                let mut rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                    let mut state = storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(EngineConfig::default()));
+                    let id = AtomId::new();
+                    let atom = CognitiveAtom::new(id, atom_type, name.clone());
+                    state.graph.add_atom(atom);
+                    if let Err(e) = storage.save_state(&state).await {
+                        eprintln!("Error: {}", e);
+                    } else {
+                        println!("Added atom [{}] {} ({:?})", id, name, atom_type);
+                    }
+                });
+            } else {
+                let (mut rt, path) = load_or_create(&cli.path);
+                let id = AtomId::new();
+                let atom = CognitiveAtom::new(id, atom_type, name.clone());
+                rt.state_mut().graph.add_atom(atom);
+                println!("Added atom [{}] {} ({:?})", id, name, atom_type);
+                if let Err(e) = Storage::save_state(rt.state(), &path) {
+                    eprintln!("Error saving state: {}", e);
+                }
+            }
         }
         Commands::Search { query, limit } => {
-            let (rt, _) = load_or_create(&cli.path);
-            let state = rt.state();
             let q_lower = query.to_lowercase();
-
-            let results: Vec<_> = state.graph.atoms()
-                .filter_map(|(_, atom)| {
-                    if atom.canonical.to_lowercase().contains(&q_lower) {
-                        let activation = state.get_activation(atom.id);
-                        Some(serde_json::json!({
-                            "id": atom.id.to_string(),
-                            "name": atom.canonical,
-                            "type": format!("{:?}", atom.atom_type),
-                            "state": format!("{:?}", atom.state),
-                            "activation": activation.map(|a| a.get().to_string()),
-                            "salience": atom.salience.get().to_string(),
-                            "confidence": atom.confidence.get().to_string(),
-                        }))
-                    } else {
-                        None
+            let results = if let Some(ref url) = cli.pg_url {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                    let ids = storage.search_atoms(&query, limit as i64).await.unwrap_or_default();
+                    let state = storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(EngineConfig::default()));
+                    let mut results = Vec::new();
+                    for id in &ids {
+                        if let Some(atom) = state.graph.get_atom(*id) {
+                            let activation = state.get_activation(atom.id);
+                            results.push(serde_json::json!({
+                                "id": atom.id.to_string(),
+                                "name": atom.canonical,
+                                "type": format!("{:?}", atom.atom_type),
+                                "state": format!("{:?}", atom.state),
+                                "activation": activation.map(|a| a.get().to_string()),
+                                "salience": atom.salience.get().to_string(),
+                                "confidence": atom.confidence.get().to_string(),
+                            }));
+                        }
                     }
+                    results
                 })
-                .take(limit)
-                .collect();
+            } else {
+                let (rt, _) = load_or_create(&cli.path);
+                let state = rt.state();
+                state.graph.atoms()
+                    .filter_map(|(_, atom)| {
+                        if atom.canonical.to_lowercase().contains(&q_lower) {
+                            let activation = state.get_activation(atom.id);
+                            Some(serde_json::json!({
+                                "id": atom.id.to_string(),
+                                "name": atom.canonical,
+                                "type": format!("{:?}", atom.atom_type),
+                                "state": format!("{:?}", atom.state),
+                                "activation": activation.map(|a| a.get().to_string()),
+                                "salience": atom.salience.get().to_string(),
+                                "confidence": atom.confidence.get().to_string(),
+                            }))
+                        } else {
+                            None
+                        }
+                    })
+                    .take(limit)
+                    .collect()
+            };
 
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&results).unwrap());
@@ -235,8 +312,17 @@ fn main() {
             }
         }
         Commands::List { limit, offset } => {
-            let (rt, _) = load_or_create(&cli.path);
-            let state = rt.state();
+            let (state, _was_pg) = if let Some(ref url) = cli.pg_url {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                    (storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(EngineConfig::default())), true)
+                })
+            } else {
+                let (rt, _) = load_or_create(&cli.path);
+                let state = rt.state().clone();
+                (state, false)
+            };
 
             let all: Vec<_> = state.graph.atoms()
                 .filter_map(|(_, atom)| {
@@ -272,8 +358,17 @@ fn main() {
                 Ok(i) => i,
                 Err(e) => { eprintln!("Error: {}", e); return; }
             };
-            let (rt, _) = load_or_create(&cli.path);
-            let state = rt.state();
+            let (state, _was_pg) = if let Some(ref url) = cli.pg_url {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                    (storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(EngineConfig::default())), true)
+                })
+            } else {
+                let (rt, _) = load_or_create(&cli.path);
+                (rt.state().clone(), false)
+            };
+
             match state.graph.get_atom(atom_id) {
                 Some(atom) => {
                     let activation = state.get_activation(atom.id);
@@ -311,13 +406,32 @@ fn main() {
                 Ok(i) => i,
                 Err(e) => { eprintln!("Error: {}", e); return; }
             };
-            let (mut rt, path) = load_or_create(&cli.path);
-            match rt.state_mut().graph.remove_atom(atom_id) {
-                Some(_) => {
-                    println!("Removed atom {}", id);
-                    save_state(&rt, &path);
+            if let Some(ref url) = cli.pg_url {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                    let mut state = storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(EngineConfig::default()));
+                    if state.graph.remove_atom(atom_id).is_some() {
+                        if let Err(e) = storage.save_state(&state).await {
+                            eprintln!("Error: {}", e);
+                        } else {
+                            println!("Removed atom {}", id);
+                        }
+                    } else {
+                        eprintln!("Atom {} not found", id);
+                    }
+                });
+            } else {
+                let (mut rt, path) = load_or_create(&cli.path);
+                match rt.state_mut().graph.remove_atom(atom_id) {
+                    Some(_) => {
+                        println!("Removed atom {}", id);
+                        if let Err(e) = Storage::save_state(rt.state(), &path) {
+                            eprintln!("Error saving state: {}", e);
+                        }
+                    }
+                    None => eprintln!("Atom {} not found", id),
                 }
-                None => eprintln!("Atom {} not found", id),
             }
         }
         Commands::Connect { src, dst, r#type } => {
@@ -333,53 +447,135 @@ fn main() {
                 Ok(t) => t,
                 Err(e) => { eprintln!("Error: {}", e); return; }
             };
-            let (mut rt, path) = load_or_create(&cli.path);
-            match rt.state_mut().graph.add_relation(src_id, dst_id, rel_type) {
-                Ok(_) => println!("Created relation: {} --[{:?}]--> {}", src, rel_type, dst),
-                Err(e) => eprintln!("Error: {:?}", e),
-            }
-            save_state(&rt, &path);
-        }
-        Commands::Ingest { text } => {
-            let (mut rt, path) = load_or_create(&cli.path);
 
-            let engine = dcma_ingest::IngestEngine::new();
-            let extracted = engine.extract_entities(&text);
-            let relations = engine.extract_relations(&extracted, &text);
-
-            let mut ids = Vec::new();
-            for entity in &extracted {
-                let atom_type = match entity.entity_type.as_str() {
-                    "Entity" => AtomType::Entity,
-                    _ => AtomType::Concept,
-                };
-                let id = AtomId::new();
-                let atom = CognitiveAtom::new(id, atom_type, entity.name.clone());
-                rt.state_mut().graph.add_atom(atom);
-                ids.push(id);
-            }
-
-            println!("Ingested {} entities and {} relations from text:", extracted.len(), relations.len());
-            for (i, entity) in extracted.iter().enumerate() {
-                println!("  [{}] {} ({})", ids[i].0, entity.name, entity.entity_type);
-            }
-            if !relations.is_empty() {
-                println!("  Relations found:");
-                for rel in &relations {
-                    if let (Some(src), Some(dst)) = (extracted.get(rel.src_idx), extracted.get(rel.dst_idx)) {
-                        println!("    {} --{}--> {}", src.name, rel.relation_type, dst.name);
+            if let Some(ref url) = cli.pg_url {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                    let mut state = storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(EngineConfig::default()));
+                    match state.graph.add_relation(src_id, dst_id, rel_type) {
+                        Ok(_) => {
+                            if let Err(e) = storage.save_state(&state).await {
+                                eprintln!("Error: {}", e);
+                            } else {
+                                println!("Created relation: {} --[{:?}]--> {}", src, rel_type, dst);
+                            }
+                        }
+                        Err(e) => eprintln!("Error: {:?}", e),
                     }
+                });
+            } else {
+                let (mut rt, path) = load_or_create(&cli.path);
+                match rt.state_mut().graph.add_relation(src_id, dst_id, rel_type) {
+                    Ok(_) => println!("Created relation: {} --[{:?}]--> {}", src, rel_type, dst),
+                    Err(e) => eprintln!("Error: {:?}", e),
+                }
+                if let Err(e) = Storage::save_state(rt.state(), &path) {
+                    eprintln!("Error saving state: {}", e);
                 }
             }
-            save_state(&rt, &path);
+        }
+        Commands::Ingest { text } => {
+            if let Some(ref url) = cli.pg_url {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                    let mut state = storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(EngineConfig::default()));
+
+                    let engine = dcma_ingest::IngestEngine::new();
+                    let extracted = engine.extract_entities(&text);
+                    let relations = engine.extract_relations(&extracted, &text);
+
+                    let mut ids = Vec::new();
+                    for entity in &extracted {
+                        let atom_type = match entity.entity_type.as_str() {
+                            "Entity" => AtomType::Entity,
+                            _ => AtomType::Concept,
+                        };
+                        let id = AtomId::new();
+                        let atom = CognitiveAtom::new(id, atom_type, entity.name.clone());
+                        state.graph.add_atom(atom);
+                        ids.push(id);
+                    }
+
+                    if let Err(e) = storage.save_state(&state).await {
+                        eprintln!("Error: {}", e);
+                    }
+
+                    println!("Ingested {} entities and {} relations from text:", extracted.len(), relations.len());
+                    for (i, entity) in extracted.iter().enumerate() {
+                        println!("  [{}] {} ({})", ids[i].0, entity.name, entity.entity_type);
+                    }
+                    if !relations.is_empty() {
+                        println!("  Relations found:");
+                        for rel in &relations {
+                            if let (Some(src), Some(dst)) = (extracted.get(rel.src_idx), extracted.get(rel.dst_idx)) {
+                                println!("    {} --{}--> {}", src.name, rel.relation_type, dst.name);
+                            }
+                        }
+                    }
+                });
+            } else {
+                let (mut rt, path) = load_or_create(&cli.path);
+
+                let engine = dcma_ingest::IngestEngine::new();
+                let extracted = engine.extract_entities(&text);
+                let relations = engine.extract_relations(&extracted, &text);
+
+                let mut ids = Vec::new();
+                for entity in &extracted {
+                    let atom_type = match entity.entity_type.as_str() {
+                        "Entity" => AtomType::Entity,
+                        _ => AtomType::Concept,
+                    };
+                    let id = AtomId::new();
+                    let atom = CognitiveAtom::new(id, atom_type, entity.name.clone());
+                    rt.state_mut().graph.add_atom(atom);
+                    ids.push(id);
+                }
+
+                println!("Ingested {} entities and {} relations from text:", extracted.len(), relations.len());
+                for (i, entity) in extracted.iter().enumerate() {
+                    println!("  [{}] {} ({})", ids[i].0, entity.name, entity.entity_type);
+                }
+                if !relations.is_empty() {
+                    println!("  Relations found:");
+                    for rel in &relations {
+                        if let (Some(src), Some(dst)) = (extracted.get(rel.src_idx), extracted.get(rel.dst_idx)) {
+                            println!("    {} --{}--> {}", src.name, rel.relation_type, dst.name);
+                        }
+                    }
+                }
+                if let Err(e) = Storage::save_state(rt.state(), &path) {
+                    eprintln!("Error saving state: {}", e);
+                }
+            }
         }
         Commands::Query { nodes } => {
             let ids: Vec<AtomId> = nodes.iter()
                 .filter(|s| !s.is_empty())
                 .filter_map(|s| parse_atom_id(s).ok())
                 .collect();
-            let (rt, _) = load_or_create(&cli.path);
-            let state = rt.state();
+            let state = if let Some(ref url) = cli.pg_url {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                    storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(EngineConfig::default()))
+                })
+            } else {
+                let (rt, _) = load_or_create(&cli.path);
+                let state_ref = rt.state();
+                let cloned = CognitiveState {
+                    graph: state_ref.graph.clone(),
+                    activations: state_ref.activations.clone(),
+                    contradictions: state_ref.contradictions.clone(),
+                    tick: state_ref.tick,
+                    history: state_ref.history.clone(),
+                    config: state_ref.config.clone(),
+                };
+                cloned
+            };
+
             let activations: HashMap<AtomId, Activation> =
                 state.activation_values().into_iter().collect();
             let field = dcma_retrieval::retrieve(
@@ -394,7 +590,6 @@ fn main() {
             println!("  Relevance: {}", field.relevance_score);
         }
         Commands::Tick { sources } => {
-            let (mut rt, path) = load_or_create(&cli.path);
             let source_ids: Vec<AtomId> = sources
                 .map(|s| s.split(',').filter(|s| !s.is_empty()).filter_map(|s| parse_atom_id(s.trim()).ok()).collect())
                 .unwrap_or_default();
@@ -403,13 +598,46 @@ fn main() {
                 query_context: vec![],
                 label: "cli".into(),
             };
-            let result = rt.tick(&stimulus);
-            println!("Tick {} completed (converged: {})", result.tick, result.convergence.converged);
-            save_state(&rt, &path);
+
+            if let Some(ref url) = cli.pg_url {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                    let config = EngineConfig::default();
+                    let state = storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(config.clone()));
+                    let mut pg_runtime = dcma_runtime::PgRuntime::with_state_and_storage(config, state, storage);
+                    let result = pg_runtime.tick(&stimulus).await;
+                    println!("Tick {} completed (converged: {})", result.tick, result.convergence.converged);
+                });
+            } else {
+                let (mut rt, path) = load_or_create(&cli.path);
+                let result = rt.tick(&stimulus);
+                println!("Tick {} completed (converged: {})", result.tick, result.convergence.converged);
+                if let Err(e) = Storage::save_state(rt.state(), &path) {
+                    eprintln!("Error saving state: {}", e);
+                }
+            }
         }
         Commands::Stats => {
-            let (rt, _) = load_or_create(&cli.path);
-            let state = rt.state();
+            let state = if let Some(ref url) = cli.pg_url {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                    storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(EngineConfig::default()))
+                })
+            } else {
+                let (rt, _) = load_or_create(&cli.path);
+                let state_ref = rt.state();
+                CognitiveState {
+                    graph: state_ref.graph.clone(),
+                    activations: state_ref.activations.clone(),
+                    contradictions: state_ref.contradictions.clone(),
+                    tick: state_ref.tick,
+                    history: state_ref.history.clone(),
+                    config: state_ref.config.clone(),
+                }
+            };
+
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&serde_json::json!({
                     "atoms": state.graph.atom_count(),
@@ -428,11 +656,28 @@ fn main() {
             }
         }
         Commands::Export { format, file } => {
-            let (rt, _) = load_or_create(&cli.path);
-            let state = rt.state();
+            let state = if let Some(ref url) = cli.pg_url {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                    storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(EngineConfig::default()))
+                })
+            } else {
+                let (rt, _) = load_or_create(&cli.path);
+                let state_ref = rt.state();
+                CognitiveState {
+                    graph: state_ref.graph.clone(),
+                    activations: state_ref.activations.clone(),
+                    contradictions: state_ref.contradictions.clone(),
+                    tick: state_ref.tick,
+                    history: state_ref.history.clone(),
+                    config: state_ref.config.clone(),
+                }
+            };
+
             match format.to_lowercase().as_str() {
                 "json" => {
-                    let json = serde_json::to_string_pretty(state).unwrap();
+                    let json = serde_json::to_string_pretty(&state).unwrap();
                     if let Some(f) = file {
                         std::fs::write(&f, &json).unwrap();
                         println!("Exported state to {}", f.display());
@@ -444,27 +689,169 @@ fn main() {
             }
         }
         Commands::Import { file } => {
-            let (mut rt, path) = load_or_create(&cli.path);
-            match Storage::load_state(&file) {
-                Ok(state) => {
-                    *rt.state_mut() = state;
-                    println!("Imported state from {}", file.display());
-                    save_state(&rt, &path);
+            match &cli.pg_url {
+                Some(url) => {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(async {
+                        let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                        match Storage::load_state(&file) {
+                            Ok(state) => {
+                                storage.save_state(&state).await.unwrap_or_else(|e| eprintln!("Error: {}", e));
+                                println!("Imported state from {} to PostgreSQL", file.display());
+                            }
+                            Err(e) => eprintln!("Error loading file: {}", e),
+                        }
+                    });
                 }
-                Err(e) => eprintln!("Error: {}", e),
+                None => {
+                    let (mut rt, path) = load_or_create(&cli.path);
+                    match Storage::load_state(&file) {
+                        Ok(state) => {
+                            *rt.state_mut() = state;
+                            println!("Imported state from {}", file.display());
+                            if let Err(e) = Storage::save_state(rt.state(), &path) {
+                                eprintln!("Error saving state: {}", e);
+                            }
+                        }
+                        Err(e) => eprintln!("Error: {}", e),
+                    }
+                }
             }
         }
         Commands::Serve { port } => {
             use std::net::SocketAddr;
-            let (rt, _) = load_or_create(&cli.path);
-            let app = dcma_api::app(rt);
-            let addr: SocketAddr = format!("0.0.0.0:{}", port).parse().unwrap();
-            println!("Starting DCMA API server on http://{}", addr);
-            let tokio_rt = tokio::runtime::Runtime::new().unwrap();
-            tokio_rt.block_on(async {
-                let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-                axum::serve(listener, app.into_make_service()).await.unwrap();
-            });
+            match &cli.pg_url {
+                Some(url) => {
+                    use axum::{
+                        extract::{Path, State},
+                        http::StatusCode,
+                        routing::{get, post, delete},
+                        Json, Router,
+                    };
+                    use std::sync::Arc;
+                    use tokio::sync::Mutex;
+
+                    type SharedPgRuntime = Arc<Mutex<dcma_runtime::PgRuntime>>;
+
+                    let url_clone = url.clone();
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(async {
+                        let storage = dcma_pg::PgStorage::connect(&url_clone).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
+                        let config = EngineConfig::default();
+                        let state = storage.load_state().await.unwrap_or_else(|_| CognitiveState::new(config.clone()));
+                        let pg_rt = dcma_runtime::PgRuntime::with_state_and_storage(config, state, storage);
+                        let shared: SharedPgRuntime = Arc::new(Mutex::new(pg_rt));
+
+                        let app = Router::new()
+                            .route("/health", get({
+                                let shared = shared.clone();
+                                move || async move {
+                                    let rt = shared.lock().await;
+                                    Json(serde_json::json!({"status": "ok", "version": "0.1.0", "atoms": rt.state().graph.atom_count(), "relations": rt.state().graph.relation_count(), "tick": rt.tick_count()}))
+                                }
+                            }))
+                            .route("/state", get({
+                                let shared = shared.clone();
+                                move || async move {
+                                    let rt = shared.lock().await;
+                                    Json(serde_json::json!({"nodes": rt.state().graph.atom_count(), "edges": rt.state().graph.relation_count(), "tick": rt.tick_count()}))
+                                }
+                            }))
+                            .route("/tick", post({
+                                let shared = shared.clone();
+                                move |Json(body): Json<serde_json::Value>| async move {
+                                    let mut rt = shared.lock().await;
+                                    let sources: Vec<AtomId> = serde_json::from_value(body.get("sources").cloned().unwrap_or(serde_json::json!([]))).unwrap_or_default();
+                                    let stimulus = Stimulus { source_nodes: sources, query_context: vec![], label: "api".into() };
+                                    let result = rt.tick(&stimulus).await;
+                                    Json(serde_json::json!({"tick": result.tick, "converged": result.convergence.converged}))
+                                }
+                            }))
+                            .route("/atoms", get({
+                                let shared = shared.clone();
+                                move || async move {
+                                    let rt = shared.lock().await;
+                                    let atoms: Vec<_> = rt.state().graph.atoms().map(|(_, a)| serde_json::json!({"id": a.id.to_string(), "name": a.canonical, "type": format!("{:?}", a.atom_type)})).collect();
+                                    Json(atoms)
+                                }
+                            }).post({
+                                let shared = shared.clone();
+                                move |Json(body): Json<serde_json::Value>| async move {
+                                    let mut rt = shared.lock().await;
+                                    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    let atom_type = match body.get("type").and_then(|v| v.as_str()) {
+                                        Some("Entity") => AtomType::Entity,
+                                        Some("Event") => AtomType::Event,
+                                        Some("Procedure") => AtomType::Procedure,
+                                        Some("Abstraction") => AtomType::Abstraction,
+                                        _ => AtomType::Concept,
+                                    };
+                                    let id = AtomId::new();
+                                    let atom = CognitiveAtom::new(id, atom_type, name);
+                                    rt.state_mut().graph.add_atom(atom);
+                                    // Auto-persist handled by PgRuntime
+                                    Json(serde_json::json!({"id": id.to_string()}))
+                                }
+                            }))
+                            .route("/atoms/{id}", get({
+                                let shared = shared.clone();
+                                move |Path(id): Path<String>| async move {
+                                    let rt = shared.lock().await;
+                                    let atom_id = uuid::Uuid::parse_str(&id).ok().map(AtomId);
+                                    if let Some(aid) = atom_id {
+                                        if let Some(atom) = rt.state().graph.get_atom(aid) {
+                                            return Json(serde_json::json!({"id": atom.id.to_string(), "name": atom.canonical, "type": format!("{:?}", atom.atom_type)}));
+                                        }
+                                    }
+                                    Json(serde_json::json!({"error": "not found"}))
+                                }
+                            }).delete({
+                                let shared = shared.clone();
+                                move |Path(id): Path<String>| async move {
+                                    let mut rt = shared.lock().await;
+                                    let atom_id = uuid::Uuid::parse_str(&id).ok().map(AtomId);
+                                    if let Some(aid) = atom_id {
+                                        rt.state_mut().graph.remove_atom(aid);
+                                    }
+                                    Json(serde_json::json!({"status": "deleted"}))
+                                }
+                            }))
+                            .route("/ingest", post({
+                                let shared = shared.clone();
+                                move |Json(body): Json<serde_json::Value>| async move {
+                                    let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                                    let engine = dcma_ingest::IngestEngine::new();
+                                    let extracted = engine.extract_entities(text);
+                                    let mut rt = shared.lock().await;
+                                    let mut count = 0;
+                                    for entity in &extracted {
+                                        let atom_type = match entity.entity_type.as_str() { "Entity" => AtomType::Entity, _ => AtomType::Concept };
+                                        let id = AtomId::new();
+                                        rt.state_mut().graph.add_atom(CognitiveAtom::new(id, atom_type, entity.name.clone()));
+                                        count += 1;
+                                    }
+                                    Json(serde_json::json!({"atoms_created": count}))
+                                }
+                            }));
+
+                        let addr: SocketAddr = format!("0.0.0.0:{}", port).parse().unwrap();
+                        println!("Starting DCMA API server on http://{} (PostgreSQL backend)", addr);
+                        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+                        axum::serve(listener, app.into_make_service()).await.unwrap();
+                    });
+                }
+                None => {
+                    let (rt, _) = load_or_create(&cli.path);
+                    let app = dcma_api::app(rt);
+                    let addr: SocketAddr = format!("0.0.0.0:{}", port).parse().unwrap();
+                    println!("Starting DCMA API server on http://{} (file backend)", addr);
+                    let tokio_rt = tokio::runtime::Runtime::new().unwrap();
+                    tokio_rt.block_on(async {
+                        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+                        axum::serve(listener, app.into_make_service()).await.unwrap();
+                    });
+                }
+            }
         }
     }
 }

@@ -604,6 +604,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "dcma"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "clap",
+ "dcma-api",
+ "dcma-core",
+ "dcma-ingest",
+ "dcma-pg",
+ "dcma-retrieval",
+ "dcma-runtime",
+ "dcma-storage",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "dcma-activation"
 version = "0.1.0"
 dependencies = [
@@ -630,23 +648,6 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "uuid",
-]
-
-[[package]]
-name = "dcma-cli"
-version = "0.1.0"
-dependencies = [
- "axum",
- "clap",
- "dcma-api",
- "dcma-core",
- "dcma-ingest",
- "dcma-retrieval",
- "dcma-runtime",
- "dcma-storage",
- "serde_json",
- "tokio",
  "uuid",
 ]
 

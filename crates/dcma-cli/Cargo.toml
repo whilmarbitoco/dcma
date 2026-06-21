@@ -1,5 +1,5 @@
 [package]
-name = "dcma-cli"
+name = "dcma"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,6 +10,7 @@ dcma-storage = { path = "../dcma-storage" }
 dcma-api = { path = "../dcma-api" }
 dcma-retrieval = { path = "../dcma-retrieval" }
 dcma-ingest = { path = "../dcma-ingest" }
+dcma-pg = { path = "../dcma-pg" }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }

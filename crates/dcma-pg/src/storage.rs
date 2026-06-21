@@ -37,6 +37,11 @@ impl PgStorage {
         Self::connect(&url).await
     }
 
+    /// Create from an existing connection pool
+    pub fn from_pool(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
     /// Run schema migration
     pub async fn migrate(&self) -> Result<(), PgError> {
         sqlx::raw_sql(include_str!("../sql/schema.sql"))
@@ -297,18 +302,18 @@ impl PgStorage {
         })
     }
 
-    async fn save_tick(&self, _tick: u64, state: &CognitiveState) -> Result<(), PgError> {
+    pub async fn save_tick(&self, _tick: u64, state: &CognitiveState) -> Result<(), PgError> {
         self.save_state(state).await
     }
 
-    async fn load_ticks(&self, _from: u64, _to: u64) -> Result<Vec<(u64, CognitiveState)>, PgError> {
+    pub async fn load_ticks(&self, _from: u64, _to: u64) -> Result<Vec<(u64, CognitiveState)>, PgError> {
         // For now, return the current state as a single tick
         // Full implementation would load from dcma_snapshots
         let state = self.load_state().await?;
         Ok(vec![(state.tick, state)])
     }
 
-    async fn save_atom(&self, atom: &CognitiveAtom) -> Result<(), PgError> {
+    pub async fn save_atom(&self, atom: &CognitiveAtom) -> Result<(), PgError> {
         let (id, atom_type, canonical, state_str, salience, confidence, origin, t_created, t_last) =
             Self::atom_to_params(atom);
 
@@ -344,7 +349,7 @@ impl PgStorage {
         Ok(())
     }
 
-    async fn delete_atom(&self, id: AtomId) -> Result<(), PgError> {
+    pub async fn delete_atom(&self, id: AtomId) -> Result<(), PgError> {
         sqlx::query("DELETE FROM dcma_atoms WHERE id = $1::uuid")
             .bind(id.to_string())
             .execute(&self.pool)
@@ -352,7 +357,7 @@ impl PgStorage {
         Ok(())
     }
 
-    async fn save_relation(&self, src: AtomId, dst: AtomId, rel_type: RelationType, weight: Weight, stability: Confidence) -> Result<(), PgError> {
+    pub async fn save_relation(&self, src: AtomId, dst: AtomId, rel_type: RelationType, weight: Weight, stability: Confidence) -> Result<(), PgError> {
         sqlx::query(
             r#"
             INSERT INTO dcma_relations (src_atom_id, dst_atom_id, relation_type, weight, stability, updated_at)
@@ -374,7 +379,7 @@ impl PgStorage {
         Ok(())
     }
 
-    async fn delete_relation(&self, src: AtomId, dst: AtomId, rel_type: RelationType) -> Result<(), PgError> {
+    pub async fn delete_relation(&self, src: AtomId, dst: AtomId, rel_type: RelationType) -> Result<(), PgError> {
         sqlx::query("DELETE FROM dcma_relations WHERE src_atom_id = $1::uuid AND dst_atom_id = $2::uuid AND relation_type = $3")
             .bind(src.to_string())
             .bind(dst.to_string())

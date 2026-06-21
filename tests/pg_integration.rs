@@ -89,8 +89,8 @@ async fn test_pg_runtime_tick_persistence() {
 
     // Create initial state with atoms
     let mut state = CognitiveState::new(config.clone());
-    let a = CognitiveAgent::new(AtomId::new(), AtomType::Concept, "machine_learning".to_string());
-    let b = CognitiveAgent::new(AtomId::new(), AtomType::Concept, "neural_networks".to_string());
+    let a = CognitiveAtom::new(AtomId::new(), AtomType::Concept, "machine_learning".to_string());
+    let b = CognitiveAtom::new(AtomId::new(), AtomType::Concept, "neural_networks".to_string());
     let id_a = a.id;
     let id_b = b.id;
     state.graph.add_atom(a);
@@ -213,5 +213,3 @@ async fn test_pg_multiple_ticks_persist_correctly() {
     assert_eq!(result.tick, 6);
 }
 
-// Helper to fix the typo in the test above
-use dcma_core::atom::CognitiveAtom as CognitiveAgent;

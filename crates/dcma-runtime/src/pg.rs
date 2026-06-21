@@ -25,6 +25,12 @@ impl PgRuntime {
         Ok(Self { runtime, storage })
     }
 
+    /// Create from a pre-existing state and storage connection
+    pub fn with_state_and_storage(config: EngineConfig, state: CognitiveState, storage: PgStorage) -> Self {
+        let runtime = Runtime::with_state(config, state);
+        Self { runtime, storage }
+    }
+
     /// Execute a tick and persist the result to PostgreSQL
     pub async fn tick(&mut self, stimulus: &Stimulus) -> TickResult {
         let result = self.runtime.tick(stimulus);
