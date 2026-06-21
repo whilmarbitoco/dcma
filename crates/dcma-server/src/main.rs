@@ -245,6 +245,38 @@ async fn get_state(State(rt): State<SharedPgRuntime>) -> Json<serde_json::Value>
     }))
 }
 
+
+/// Find an existing atom by name (case-insensitive exact match).
+fn find_atom_by_name(rt: &dcma_runtime::PgRuntime, name: &str) -> Option<dcma_core::atom::CognitiveAtom> {
+    let name_lower = name.to_lowercase();
+    rt.state().graph.atoms()
+        .find_map(|(_, atom)| {
+            if atom.canonical.to_lowercase() == name_lower {
+                Some(atom.clone())
+            } else {
+                None
+            }
+        })
+}
+
+/// Find all atoms whose names are prefixes or duplicates of the given name.
+fn find_similar_atoms(rt: &dcma_runtime::PgRuntime, name: &str) -> Vec<dcma_core::atom::CognitiveAtom> {
+    let name_lower = name.to_lowercase();
+    rt.state().graph.atoms()
+        .filter_map(|(_, atom)| {
+            let atom_lower = atom.canonical.to_lowercase();
+            if atom_lower == name_lower
+                || (name_lower.len() >= 4 && atom_lower.starts_with(&name_lower))
+                || (atom_lower.len() >= 4 && name_lower.starts_with(&atom_lower))
+            {
+                Some(atom.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 async fn ingest(
     State(rt): State<SharedPgRuntime>,
     Json(req): Json<IngestRequest>,
@@ -260,6 +292,9 @@ async fn ingest(
     let relations = engine.extract_relations(&extracted, &req.text);
     let mut rt = rt.lock().await;
     let mut entity_names = Vec::new();
+    let mut atoms_created = 0;
+    let mut atoms_merged = 0;
+
     for entity in &extracted {
         let atom_type = match entity.entity_type.as_str() {
             "Entity" => AtomType::Entity,
@@ -268,18 +303,46 @@ async fn ingest(
             "Abstraction" => AtomType::Abstraction,
             _ => AtomType::Concept,
         };
-        let id = AtomId::new();
-        let mut atom = dcma_core::atom::CognitiveAtom::new(id, atom_type, entity.name.clone());
-        atom.attributes.insert("content".to_string(), entity.name.clone());
-        rt.state_mut().graph.add_atom(atom);
-        entity_names.push(entity.name.clone());
+
+        // Entity resolution: check if an atom with this name already exists
+        if let Some(existing) = find_atom_by_name(&rt, &entity.name) {
+            // Merge: update existing atom's content if new extraction has more info
+            let existing_content = existing.attributes.get("content").map(|s| s.len()).unwrap_or(0);
+            if entity.name.len() > existing_content {
+                if let Some(atom) = rt.state_mut().graph.get_atom_mut(existing.id) {
+                    atom.attributes.insert("content".to_string(), entity.name.clone());
+                }
+            }
+            entity_names.push(format!("{} (merged)", entity.name));
+            atoms_merged += 1;
+        } else {
+            // Check for similar names to avoid near-duplicates
+            let similar = find_similar_atoms(&rt, &entity.name);
+            if similar.len() > 1 {
+                let best = similar.iter().max_by_key(|a| {
+                    a.salience.get().to_string().parse::<f64>().unwrap_or(0.0) as i64
+                }).unwrap();
+                if let Some(atom) = rt.state_mut().graph.get_atom_mut(best.id) {
+                    atom.attributes.insert("content".to_string(), entity.name.clone());
+                }
+                entity_names.push(format!("{} (merged with similar)", entity.name));
+                atoms_merged += 1;
+            } else {
+                let id = AtomId::new();
+                let mut atom = dcma_core::atom::CognitiveAtom::new(id, atom_type, entity.name.clone());
+                atom.attributes.insert("content".to_string(), entity.name.clone());
+                rt.state_mut().graph.add_atom(atom);
+                entity_names.push(entity.name.clone());
+                atoms_created += 1;
+            }
+        }
     }
     let state = rt.state().clone();
     if let Err(e) = rt.storage().save_state(&state).await {
         tracing::warn!("Failed to persist after ingest: {}", e);
     }
     Ok(Json(IngestResponse {
-        atoms_created: extracted.len(),
+        atoms_created: atoms_created + atoms_merged,
         relations_found: relations.len(),
         entity_names,
     }))
@@ -297,6 +360,34 @@ async fn remember(
     }
     let atom_type = parse_atom_type(&req.atom_type);
     let mut rt = rt.lock().await;
+
+    // Entity resolution: check if atom with this name already exists
+    if let Some(existing) = find_atom_by_name(&rt, &req.name) {
+        // Update existing atom
+        let atom = rt.state_mut().graph.get_atom_mut(existing.id).unwrap();
+        let mut attrs = req.attributes.clone();
+        if let Some(c) = req.content {
+            attrs.insert("content".to_string(), c);
+        }
+        if let Some(t) = req.tags {
+            attrs.insert("tags".to_string(), t);
+        }
+        if !attrs.is_empty() {
+            atom.attributes = attrs;
+        }
+        if let Some(sal) = req.salience {
+            use rust_decimal::Decimal;
+            atom.salience = Salience::new(Decimal::try_from(sal).unwrap_or(Decimal::ZERO));
+        }
+        atom.atom_type = atom_type;
+        let summary = atom_to_summary(atom, None, None);
+        let state = rt.state().clone();
+        if let Err(e) = rt.storage().save_state(&state).await {
+            tracing::warn!("Failed to persist after remember: {}", e);
+        }
+        return Ok(Json(summary));
+    }
+
     let id = AtomId::new();
     let mut atom = dcma_core::atom::CognitiveAtom::new(id, atom_type, req.name.clone());
     let mut attrs = req.attributes.clone();
