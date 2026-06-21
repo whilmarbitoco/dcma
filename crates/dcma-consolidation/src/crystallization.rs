@@ -80,10 +80,14 @@ fn create_abstraction(graph: &mut CognitiveGraph, motif: &Motif, _config: &Engin
     // Compute mean salience of participating nodes
     let mut salience_sum = Decimal::ZERO;
     let mut salience_count = 0usize;
+    let mut support_sum: u64 = 0;
+    let mut oppose_sum: u64 = 0;
     for &node_idx in &motif.pattern {
         if let Some(atom) = graph.get_atom_by_index(node_idx) {
             salience_sum += atom.salience.get();
             salience_count += 1;
+            support_sum = support_sum.saturating_add(atom.evidence.support);
+            oppose_sum = oppose_sum.saturating_add(atom.evidence.oppose);
         }
     }
     let mean_salience = if salience_count > 0 {
@@ -103,6 +107,7 @@ fn create_abstraction(graph: &mut CognitiveGraph, motif: &Motif, _config: &Engin
     let mut abstraction = CognitiveAtom::new(AtomId::new(), AtomType::Abstraction, canonical);
     abstraction.salience = Salience::new(salience_val);
     abstraction.confidence = Confidence::new(stability_val);
+    abstraction.evidence = EvidenceCounter::new(support_sum, oppose_sum);
 
     let abstraction_id = abstraction.id;
     graph.add_atom(abstraction);

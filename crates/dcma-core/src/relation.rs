@@ -11,6 +11,7 @@ pub struct Relation {
     pub stability: Confidence,
     pub confidence: Confidence,
     pub t_created: u64,
+    pub evidence: EvidenceCounter,
 }
 
 impl Relation {
@@ -24,6 +25,7 @@ impl Relation {
             stability: Confidence::ZERO,
             confidence: Confidence::ZERO,
             t_created: 0,
+            evidence: EvidenceCounter::default(),
         }
     }
 

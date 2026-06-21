@@ -2,6 +2,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
+use std::str::FromStr;
 use uuid::Uuid;
 
 // ============================================================
@@ -440,6 +441,62 @@ pub enum RelationType {
 }
 
 // ============================================================
+// EvidenceCounter
+// ============================================================
+
+/// Accumulated evidence for an atom or relation.
+///
+/// Counts of supporting and opposing observations. Confidence is derived
+/// as `support / (support + oppose + 1)` — a plain Bayesian ratio with no
+/// time-weighting or backprop.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EvidenceCounter {
+    pub support: u64,
+    pub oppose: u64,
+}
+
+impl EvidenceCounter {
+    pub fn new(support: u64, oppose: u64) -> Self {
+        Self { support, oppose }
+    }
+
+    pub fn confidence(&self) -> Decimal {
+        let s = Decimal::from(self.support);
+        let o = Decimal::from(self.oppose);
+        s / (s + o + Decimal::ONE)
+    }
+
+    pub fn record_support(&mut self) {
+        self.support += 1;
+    }
+
+    pub fn record_oppose(&mut self) {
+        self.oppose += 1;
+    }
+}
+
+/// Confidence-related engine settings.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct EvidenceConfig {
+    /// Minimum confidence required for an atom/relation to appear in
+    /// beam-search results. Set to 0.0 to disable filtering.
+    pub min_confidence: Decimal,
+    /// Coefficient applied to the average confidence term in the relevance
+    /// formula (the NU coefficient in the 6-term formula).
+    pub confidence_coefficient: Decimal,
+}
+
+impl Default for EvidenceConfig {
+    fn default() -> Self {
+        Self {
+            min_confidence: Decimal::ZERO,
+            confidence_coefficient: Decimal::from_str_exact("0.08")
+                .expect("0.08 literal"),
+        }
+    }
+}
+
+// ============================================================
 // EngineConfig
 // ============================================================
 
@@ -478,6 +535,8 @@ pub struct EngineConfig {
     pub beam_width: usize,
     pub max_retrieval_depth: usize,
     pub max_subgraph_size: usize,
+    // Evidence parameters
+    pub evidence_config: EvidenceConfig,
 }
 
 impl Default for EngineConfig {
@@ -510,6 +569,7 @@ impl Default for EngineConfig {
             beam_width: 20,
             max_retrieval_depth: 4,
             max_subgraph_size: 500,
+            evidence_config: EvidenceConfig::default(),
         }
     }
 }

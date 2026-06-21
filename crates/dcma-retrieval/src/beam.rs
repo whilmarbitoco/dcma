@@ -104,7 +104,7 @@ pub fn retrieve_beam(
                 let mut new_subgraph = subgraph_nodes.clone();
                 new_subgraph.push(nidx);
 
-                let score = relevance(graph, &new_subgraph, query_ids, activations, current_tick);
+                let score = relevance(graph, &new_subgraph, query_ids, activations, current_tick, &config.evidence_config);
                 candidates.push((new_subgraph, score));
             }
         }
@@ -138,20 +138,36 @@ pub fn retrieve_beam(
         frontier = candidates;
     }
 
-    let nodes_atom_ids: Vec<AtomId> = best_subgraph
+    let min_conf = config.evidence_config.min_confidence;
+    let filtered_subgraph: Vec<NodeIndex> = if min_conf > Decimal::ZERO {
+        best_subgraph
+            .iter()
+            .copied()
+            .filter(|idx| {
+                graph
+                    .get_atom_by_index(*idx)
+                    .map(|a| a.evidence.confidence() >= min_conf)
+                    .unwrap_or(true)
+            })
+            .collect()
+    } else {
+        best_subgraph
+    };
+
+    let nodes_atom_ids: Vec<AtomId> = filtered_subgraph
         .iter()
         .filter_map(|idx| graph.get_atom_by_index(*idx).map(|a| a.id))
         .collect();
 
     let (salience_score, activation_score) =
-        compute_field_scores(graph, &best_subgraph, activations);
+        compute_field_scores(graph, &filtered_subgraph, activations);
 
     CognitiveField {
         nodes: nodes_atom_ids,
         relevance_score: best_score,
         salience_score,
         activation_score,
-        contradiction_flags: vec![false; best_subgraph.len()],
+        contradiction_flags: vec![false; filtered_subgraph.len()],
         metadata: RetrievalMetadata {
             traversal_depth: d_max,
             beam_width_used: beam_width,
@@ -224,6 +240,7 @@ pub fn retrieve_beam_with_contradiction(
 
                 let score = relevance_with_contradiction(
                     graph, &new_subgraph, query_ids, activations, contradictions, current_tick,
+                    &config.evidence_config,
                 );
                 candidates.push((new_subgraph, score));
             }
@@ -258,15 +275,31 @@ pub fn retrieve_beam_with_contradiction(
         frontier = candidates;
     }
 
-    let nodes_atom_ids: Vec<AtomId> = best_subgraph
+    let min_conf = config.evidence_config.min_confidence;
+    let filtered_subgraph: Vec<NodeIndex> = if min_conf > Decimal::ZERO {
+        best_subgraph
+            .iter()
+            .copied()
+            .filter(|idx| {
+                graph
+                    .get_atom_by_index(*idx)
+                    .map(|a| a.evidence.confidence() >= min_conf)
+                    .unwrap_or(true)
+            })
+            .collect()
+    } else {
+        best_subgraph
+    };
+
+    let nodes_atom_ids: Vec<AtomId> = filtered_subgraph
         .iter()
         .filter_map(|idx| graph.get_atom_by_index(*idx).map(|a| a.id))
         .collect();
 
     let (salience_score, activation_score) =
-        compute_field_scores(graph, &best_subgraph, activations);
+        compute_field_scores(graph, &filtered_subgraph, activations);
 
-    let contradiction_flags = compute_contradiction_flags(&best_subgraph, graph, contradictions);
+    let contradiction_flags = compute_contradiction_flags(&filtered_subgraph, graph, contradictions);
 
     CognitiveField {
         nodes: nodes_atom_ids,

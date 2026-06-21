@@ -77,7 +77,7 @@ impl Runtime {
         let activation_map: HashMap<AtomId, Activation> =
             self.state.activation_values().into_iter().collect();
         self.contradiction_structure
-            .update_all(&self.state.graph, &activation_map, &self.config);
+            .update_all(&mut self.state.graph, &activation_map, &self.config);
 
         // Sync contradiction data back to state
         for ((a, b), p) in self.contradiction_structure.pairs() {

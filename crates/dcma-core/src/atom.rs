@@ -17,6 +17,7 @@ pub struct CognitiveAtom {
     pub reinforcement_history: Vec<u64>,
     pub activation_history: Vec<Activation>,
     pub contradiction_indices: Vec<usize>,
+    pub evidence: EvidenceCounter,
 }
 
 impl CognitiveAtom {
@@ -35,6 +36,7 @@ impl CognitiveAtom {
             reinforcement_history: Vec::new(),
             activation_history: Vec::new(),
             contradiction_indices: Vec::new(),
+            evidence: EvidenceCounter::default(),
         }
     }
 

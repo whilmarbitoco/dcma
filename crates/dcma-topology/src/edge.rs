@@ -131,6 +131,14 @@ pub fn evolve_weights(
             let rel = graph.get_relation_mut(edge_idx).unwrap();
             let old_weight = rel.weight.get();
             rel.evolve_weight(reinforcement_signal, contradiction_signal, config);
+
+            if reinforcement_signal > Decimal::ZERO {
+                rel.evidence.record_support();
+            }
+            if contradiction_signal > Decimal::ZERO {
+                rel.evidence.record_oppose();
+            }
+
             let new_weight = rel.weight.get();
 
             record_weight(edge_idx, new_weight);

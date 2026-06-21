@@ -89,9 +89,14 @@ impl ContradictionStructure {
 
     /// Update all contradiction pressures in the graph.
     /// Finds all Contradicts edges and updates their pressures.
+    ///
+    /// Also feeds resolution/equilibrium into evidence on the graph's atoms:
+    /// - StableEquilibrium → record_support on both atoms
+    /// - Resolved → record_support on the dominant atom (higher activation),
+    ///              record_oppose on the suppressed atom
     pub fn update_all(
         &mut self,
-        graph: &CognitiveGraph,
+        graph: &mut CognitiveGraph,
         activations: &HashMap<AtomId, Activation>,
         config: &EngineConfig,
     ) {
@@ -103,9 +108,44 @@ impl ContradictionStructure {
             .collect();
 
         for (a, b) in contradiction_edges {
+            let old_pressure = self.get(a, b);
+
             let act_a = activations.get(&a).copied().unwrap_or(Activation::ZERO);
             let act_b = activations.get(&b).copied().unwrap_or(Activation::ZERO);
             self.update_pressure(a, b, act_a, act_b, config);
+
+            let new_pressure = self.get(a, b);
+            let pressure_delta = new_pressure.get() - old_pressure.get();
+            let state = self.classify(a, b, pressure_delta, config);
+
+            match state {
+                EquilibriumState::StableEquilibrium => {
+                    if let Some(atom) = graph.get_atom_mut(a) {
+                        atom.evidence.record_support();
+                    }
+                    if let Some(atom) = graph.get_atom_mut(b) {
+                        atom.evidence.record_support();
+                    }
+                }
+                EquilibriumState::Resolved => {
+                    if act_a.get() > act_b.get() {
+                        if let Some(atom) = graph.get_atom_mut(a) {
+                            atom.evidence.record_support();
+                        }
+                        if let Some(atom) = graph.get_atom_mut(b) {
+                            atom.evidence.record_oppose();
+                        }
+                    } else if act_b.get() > act_a.get() {
+                        if let Some(atom) = graph.get_atom_mut(a) {
+                            atom.evidence.record_oppose();
+                        }
+                        if let Some(atom) = graph.get_atom_mut(b) {
+                            atom.evidence.record_support();
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -301,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_update_all_from_graph() {
-        let (g, id_a, id_b) = make_contradicting_atoms();
+        let (mut g, id_a, id_b) = make_contradicting_atoms();
         let mut cs = ContradictionStructure::new();
         let config = EngineConfig::default();
 
@@ -309,7 +349,7 @@ mod tests {
         activations.insert(id_a, Activation::new(Decimal::ONE));
         activations.insert(id_b, Activation::new(Decimal::from_str_exact("0.1").unwrap()));
 
-        cs.update_all(&g, &activations, &config);
+        cs.update_all(&mut g, &activations, &config);
 
         // Should have tracked the contradiction
         assert_eq!(cs.len(), 1);

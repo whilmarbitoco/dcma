@@ -56,6 +56,7 @@ pub fn relevance(
     query_ids: &[AtomId],
     activations: &HashMap<AtomId, Activation>,
     current_tick: u64,
+    evidence_config: &EvidenceConfig,
 ) -> Decimal {
     if subgraph_nodes.is_empty() {
         return Decimal::ZERO;
@@ -67,11 +68,13 @@ pub fn relevance(
     let delta = Decimal::from_str_exact(DELTA).unwrap();
     let lambda_d = Decimal::from_str_exact(LAMBDA).unwrap();
     let mu = Decimal::from_str_exact(MU).unwrap();
+    let nu = evidence_config.confidence_coefficient;
 
     let mut coherence = Decimal::ZERO;
     let mut salience = Decimal::ZERO;
     let mut activation_res = Decimal::ZERO;
     let mut temporal = Decimal::ZERO;
+    let mut evidence_conf = Decimal::ZERO;
 
     for idx in subgraph_nodes {
         if let Some(atom) = graph.get_atom_by_index(*idx) {
@@ -83,12 +86,14 @@ pub fn relevance(
             let ticks_since = current_tick.saturating_sub(atom.t_last_accessed);
             let recency = exp_approx(-mu * Decimal::from(ticks_since));
             temporal += recency;
+            evidence_conf += atom.evidence.confidence();
         }
     }
     coherence /= n;
     salience /= n;
     activation_res /= n;
     temporal /= n;
+    evidence_conf /= n;
 
     let graph_diameter = graph.diameter().unwrap_or(1);
     let traversal_cost = if graph_diameter > 0 && subgraph_nodes.len() > 1 {
@@ -111,6 +116,7 @@ pub fn relevance(
     };
 
     alpha * coherence + beta * salience + gamma * activation_res + delta * temporal
+        + nu * evidence_conf
         - lambda_d * traversal_cost
 }
 
@@ -121,8 +127,9 @@ pub fn relevance_with_contradiction(
     activations: &HashMap<AtomId, Activation>,
     contradictions: &HashMap<(AtomId, AtomId), Pressure>,
     current_tick: u64,
+    evidence_config: &EvidenceConfig,
 ) -> Decimal {
-    let base = relevance(graph, subgraph_nodes, query_ids, activations, current_tick);
+    let base = relevance(graph, subgraph_nodes, query_ids, activations, current_tick, evidence_config);
     if subgraph_nodes.is_empty() {
         return Decimal::ZERO;
     }
@@ -215,7 +222,8 @@ mod tests {
         activations.insert(id_a, Activation::new(Decimal::from_str_exact("0.9").unwrap()));
         activations.insert(id_b, Activation::new(Decimal::from_str_exact("0.7").unwrap()));
         activations.insert(id_c, Activation::new(Decimal::from_str_exact("0.5").unwrap()));
-        let score = relevance(&g, &[idx_a, idx_b, idx_c], &[id_a], &activations, 10);
+        let ev_cfg = EvidenceConfig::default();
+        let score = relevance(&g, &[idx_a, idx_b, idx_c], &[id_a], &activations, 10, &ev_cfg);
         assert!(score > Decimal::ZERO, "Relevance should be positive for connected graph");
         assert!(score <= Decimal::ONE, "Relevance should not exceed 1.0");
     }
@@ -223,7 +231,8 @@ mod tests {
     #[test]
     fn test_relevance_empty_subgraph() {
         let (g, _, _, _, _, _) = make_test_graph();
-        let score = relevance(&g, &[], &[AtomId::new()], &HashMap::new(), 0);
+        let ev_cfg = EvidenceConfig::default();
+        let score = relevance(&g, &[], &[AtomId::new()], &HashMap::new(), 0, &ev_cfg);
         assert_eq!(score, Decimal::ZERO);
     }
 
@@ -237,11 +246,12 @@ mod tests {
         activations.insert(id_a, Activation::new(Decimal::from_str_exact("0.9").unwrap()));
         activations.insert(id_b, Activation::new(Decimal::from_str_exact("0.7").unwrap()));
         activations.insert(id_c, Activation::new(Decimal::from_str_exact("0.5").unwrap()));
-        let base = relevance(&g, &[idx_a, idx_b, idx_c], &[id_a], &activations, 10);
+        let ev_cfg = EvidenceConfig::default();
+        let base = relevance(&g, &[idx_a, idx_b, idx_c], &[id_a], &activations, 10, &ev_cfg);
         let mut contradictions = HashMap::new();
         contradictions.insert((id_a, id_b), Pressure::new(Decimal::from_str_exact("0.5").unwrap()));
         let contrad = relevance_with_contradiction(
-            &g, &[idx_a, idx_b, idx_c], &[id_a], &activations, &contradictions, 10,
+            &g, &[idx_a, idx_b, idx_c], &[id_a], &activations, &contradictions, 10, &ev_cfg,
         );
         assert!(contrad < base, "Contradiction should reduce relevance");
     }
