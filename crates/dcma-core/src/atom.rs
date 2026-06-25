@@ -1,4 +1,5 @@
 use super::types::*;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -18,6 +19,7 @@ pub struct CognitiveAtom {
     pub activation_history: Vec<Activation>,
     pub contradiction_indices: Vec<usize>,
     pub evidence: EvidenceCounter,
+    pub t_last_evidence: u64,
 }
 
 impl CognitiveAtom {
@@ -37,6 +39,7 @@ impl CognitiveAtom {
             activation_history: Vec::new(),
             contradiction_indices: Vec::new(),
             evidence: EvidenceCounter::default(),
+            t_last_evidence: 0,
         }
     }
 
@@ -59,6 +62,37 @@ impl CognitiveAtom {
     pub fn record_reinforcement(&mut self, tick: u64) {
         self.reinforcement_history.push(tick);
         self.t_last_accessed = tick;
+    }
+
+    /// Compute evidence confidence with linear decay over half_life ticks of inactivity.
+    pub fn evidence_decayed_confidence(&self, half_life: u64, current_tick: u64) -> Decimal {
+        if half_life == 0 {
+            return self.evidence.confidence();
+        }
+        let elapsed = current_tick.saturating_sub(self.t_last_evidence);
+        if elapsed == 0 {
+            return self.evidence.confidence();
+        }
+        let decay_num = Decimal::from(half_life.saturating_sub(elapsed));
+        let decay_den = Decimal::from(half_life);
+        let decay = if decay_den == Decimal::ZERO {
+            Decimal::ONE
+        } else {
+            (decay_num / decay_den).max(Decimal::ZERO)
+        };
+        let s = Decimal::from(self.evidence.support) * decay;
+        let o = Decimal::from(self.evidence.oppose) * decay;
+        s / (s + o + Decimal::ONE)
+    }
+
+    pub fn record_support_with_tick(&mut self, tick: u64) {
+        self.evidence.record_support();
+        self.t_last_evidence = tick;
+    }
+
+    pub fn record_oppose_with_tick(&mut self, tick: u64) {
+        self.evidence.record_oppose();
+        self.t_last_evidence = tick;
     }
 }
 

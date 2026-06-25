@@ -12,6 +12,7 @@ pub struct Relation {
     pub confidence: Confidence,
     pub t_created: u64,
     pub evidence: EvidenceCounter,
+    pub t_last_evidence: u64,
 }
 
 impl Relation {
@@ -26,6 +27,7 @@ impl Relation {
             confidence: Confidence::ZERO,
             t_created: 0,
             evidence: EvidenceCounter::default(),
+            t_last_evidence: 0,
         }
     }
 
@@ -39,6 +41,38 @@ impl Relation {
             .clamp(rust_decimal::Decimal::ZERO, rust_decimal::Decimal::ONE);
         self.weight = Weight::new(new_weight);
     }
+    /// Compute evidence confidence with linear decay over half_life ticks of inactivity.
+    pub fn evidence_decayed_confidence(&self, half_life: u64, current_tick: u64) -> rust_decimal::Decimal {
+        if half_life == 0 {
+            return self.evidence.confidence();
+        }
+        let elapsed = current_tick.saturating_sub(self.t_last_evidence);
+        if elapsed == 0 {
+            return self.evidence.confidence();
+        }
+        let decay_num = rust_decimal::Decimal::from(half_life.saturating_sub(elapsed));
+        let decay_den = rust_decimal::Decimal::from(half_life);
+        let decay = if decay_den == rust_decimal::Decimal::ZERO {
+            rust_decimal::Decimal::ONE
+        } else {
+            (decay_num / decay_den).max(rust_decimal::Decimal::ZERO)
+        };
+        let s = rust_decimal::Decimal::from(self.evidence.support) * decay;
+        let o = rust_decimal::Decimal::from(self.evidence.oppose) * decay;
+        s / (s + o + rust_decimal::Decimal::ONE)
+    }
+
+    pub fn record_support_with_tick(&mut self, tick: u64) {
+        self.evidence.record_support();
+        self.t_last_evidence = tick;
+    }
+
+    pub fn record_oppose_with_tick(&mut self, tick: u64) {
+        self.evidence.record_oppose();
+        self.t_last_evidence = tick;
+    }
+
+
 }
 
 #[cfg(test)]
@@ -146,4 +180,6 @@ mod tests {
         assert!(rel.weight.get() >= rust_decimal::Decimal::ZERO);
         assert_eq!(rel.weight.get(), rust_decimal::Decimal::ZERO);
     }
+
+
 }

@@ -101,9 +101,10 @@ impl ContradictionEngine {
         graph: &mut CognitiveGraph,
         activations: &HashMap<AtomId, Activation>,
         config: &EngineConfig,
+        current_tick: u64,
     ) -> Vec<((AtomId, AtomId), EquilibriumState)> {
         // Update all pressures
-        self.structure.update_all(graph, activations, config);
+        self.structure.update_all(graph, activations, config, current_tick);
 
         // Classify each contradiction
         let pairs = self.structure.pairs();
@@ -222,7 +223,7 @@ mod tests {
         activations.insert(id_a, Activation::new(Decimal::ONE));
         activations.insert(id_b, Activation::new(Decimal::from_str_exact("0.1").unwrap()));
 
-        let results = engine.tick(&mut g, &activations, &engine.config.clone());
+        let results = engine.tick(&mut g, &activations, &engine.config.clone(), 0);
 
         assert_eq!(results.len(), 1);
         let ((ra, rb), state) = &results[0];
@@ -252,7 +253,7 @@ mod tests {
 
         // Run many ticks — pressure should build toward resolution
         for _ in 0..50 {
-            engine.tick(&mut g, &activations, &config);
+            engine.tick(&mut g, &activations, &config, 0);
         }
 
         let state = engine.get_state(id_a, id_b);

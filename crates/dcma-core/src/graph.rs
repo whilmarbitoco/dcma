@@ -76,6 +76,8 @@ impl<'de> Deserialize<'de> for CognitiveGraph {
                 stability: rel.stability,
                 confidence: rel.confidence,
                 t_created: rel.t_created,
+                evidence: rel.evidence.clone(),
+                t_last_evidence: rel.t_last_evidence,
             };
             g.graph.add_edge(src_idx, dst_idx, new_rel);
         }
@@ -379,6 +381,8 @@ impl CognitiveGraph {
                             stability: rel.stability,
                             confidence: rel.confidence,
                             t_created: rel.t_created,
+                evidence: rel.evidence.clone(),
+                t_last_evidence: rel.t_last_evidence,
                         };
                         let new_src = sub.id_map[&rel.src];
                         let new_dst = sub.id_map[&rel.dst];

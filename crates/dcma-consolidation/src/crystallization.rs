@@ -24,6 +24,7 @@ pub fn crystallize(
     graph: &mut CognitiveGraph,
     motifs: &[Motif],
     config: &EngineConfig,
+    current_tick: u64,
 ) -> CrystallizationResult {
     let mut new_abstractions = Vec::new();
     let mut consolidated_nodes = Vec::new();
@@ -48,7 +49,7 @@ pub fn crystallize(
             continue;
         }
 
-        let abstraction_id = create_abstraction(graph, motif, config);
+        let abstraction_id = create_abstraction(graph, motif, config, current_tick);
         new_abstractions.push(abstraction_id);
 
         for &node_idx in &motif.pattern {
@@ -76,7 +77,7 @@ pub fn crystallize(
     }
 }
 
-fn create_abstraction(graph: &mut CognitiveGraph, motif: &Motif, _config: &EngineConfig) -> AtomId {
+fn create_abstraction(graph: &mut CognitiveGraph, motif: &Motif, _config: &EngineConfig, current_tick: u64) -> AtomId {
     // Compute mean salience of participating nodes
     let mut salience_sum = Decimal::ZERO;
     let mut salience_count = 0usize;
@@ -108,6 +109,7 @@ fn create_abstraction(graph: &mut CognitiveGraph, motif: &Motif, _config: &Engin
     abstraction.salience = Salience::new(salience_val);
     abstraction.confidence = Confidence::new(stability_val);
     abstraction.evidence = EvidenceCounter::new(support_sum, oppose_sum);
+    abstraction.t_last_evidence = current_tick;
 
     let abstraction_id = abstraction.id;
     graph.add_atom(abstraction);
@@ -147,9 +149,9 @@ fn create_abstraction(graph: &mut CognitiveGraph, motif: &Motif, _config: &Engin
     abstraction_id
 }
 
-pub fn consolidate(graph: &mut CognitiveGraph, config: &EngineConfig) -> CrystallizationReport {
+pub fn consolidate(graph: &mut CognitiveGraph, config: &EngineConfig, current_tick: u64) -> CrystallizationReport {
     let report = crate::motif::detect_motifs(graph, config);
-    let result = crystallize(graph, &report.motifs, config);
+    let result = crystallize(graph, &report.motifs, config, current_tick);
     result.report
 }
 
@@ -241,7 +243,7 @@ mod tests {
         let mut graph = build_triangle_graph(5);
         let config = EngineConfig::default();
         let motif_report = detect_motifs(&graph, &config);
-        let result = crystallize(&mut graph, &motif_report.motifs, &config);
+        let result = crystallize(&mut graph, &motif_report.motifs, &config, 0);
 
         assert_eq!(result.new_abstractions.len(), 1);
         let abs_id = result.new_abstractions[0];
@@ -271,7 +273,7 @@ mod tests {
         let mut graph = build_triangle_graph(5);
         let config = EngineConfig::default();
         let motif_report = detect_motifs(&graph, &config);
-        let result = crystallize(&mut graph, &motif_report.motifs, &config);
+        let result = crystallize(&mut graph, &motif_report.motifs, &config, 0);
 
         assert!(result.consolidated_nodes.len() > 0);
         for node_id in &result.consolidated_nodes {
@@ -292,7 +294,7 @@ mod tests {
 
         let mut graph = CognitiveGraph::new();
         let config = EngineConfig::default();
-        let result = crystallize(&mut graph, &[motif], &config);
+        let result = crystallize(&mut graph, &[motif], &config, 0);
 
         assert_eq!(result.new_abstractions.len(), 0);
         assert_eq!(result.report.motifs_skipped_low_recurrence, 1);
@@ -310,7 +312,7 @@ mod tests {
 
         let mut graph = CognitiveGraph::new();
         let config = EngineConfig::default();
-        let result = crystallize(&mut graph, &[motif], &config);
+        let result = crystallize(&mut graph, &[motif], &config, 0);
 
         assert_eq!(result.new_abstractions.len(), 0);
         assert_eq!(result.report.motifs_skipped_low_stability, 1);
@@ -323,14 +325,14 @@ mod tests {
 
         // First level of crystallization
         let motif_report = detect_motifs(&graph, &config);
-        let result = crystallize(&mut graph, &motif_report.motifs, &config);
+        let result = crystallize(&mut graph, &motif_report.motifs, &config, 0);
         assert_eq!(result.new_abstractions.len(), 1);
 
         // Second level: create multiple abstractions, then detect motifs among them
         // Build more triangles so we can get multiple abstraction nodes
         let mut graph2 = build_triangle_graph(12);
         let motif_report2 = detect_motifs(&graph2, &config);
-        let result2 = crystallize(&mut graph2, &motif_report2.motifs, &config);
+        let result2 = crystallize(&mut graph2, &motif_report2.motifs, &config, 0);
         // With 12 triangles (36 nodes), we should get at most 2 motifs (12/5 = 2)
         // Actually with 12 identical triangles we have 12 instances of the same motif
         // recurrence=12 >= threshold=5, so we should crystallize once
@@ -357,7 +359,7 @@ mod tests {
     fn test_consolidate_end_to_end() {
         let mut graph = build_triangle_graph(5);
         let config = EngineConfig::default();
-        let report = consolidate(&mut graph, &config);
+        let report = consolidate(&mut graph, &config, 0);
 
         assert_eq!(report.motifs_crystallized, 1);
 
@@ -393,7 +395,7 @@ mod tests {
 
         let config = EngineConfig::default();
         let motif_report = detect_motifs(&graph, &config);
-        let _ = crystallize(&mut graph, &motif_report.motifs, &config);
+        let _ = crystallize(&mut graph, &motif_report.motifs, &config, 0);
 
         // The non-motif edge should still exist
         let remaining = graph.relations_between(atoms[0], atoms[1]);

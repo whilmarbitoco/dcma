@@ -77,7 +77,7 @@ impl Runtime {
         let activation_map: HashMap<AtomId, Activation> =
             self.state.activation_values().into_iter().collect();
         self.contradiction_structure
-            .update_all(&mut self.state.graph, &activation_map, &self.config);
+            .update_all(&mut self.state.graph, &activation_map, &self.config, self.tick_count);
 
         // Sync contradiction data back to state
         for ((a, b), p) in self.contradiction_structure.pairs() {
@@ -100,7 +100,7 @@ impl Runtime {
         // 6. Consolidation — run every CONSOLIDATION_INTERVAL ticks
         let (consolidation_applied, consolidation_report) =
             if self.tick_count % CONSOLIDATION_INTERVAL == 0 {
-                let report = consolidate(&mut self.state.graph, &self.config);
+                let report = consolidate(&mut self.state.graph, &self.config, self.tick_count);
                 (true, Some(report))
             } else {
                 (false, None)

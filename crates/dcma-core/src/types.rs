@@ -484,14 +484,17 @@ pub struct EvidenceConfig {
     /// Coefficient applied to the average confidence term in the relevance
     /// formula (the NU coefficient in the 6-term formula).
     pub confidence_coefficient: Decimal,
+    /// Number of ticks of inactivity after which evidence confidence decays to 0.
+    pub half_life_ticks: u64,
 }
 
 impl Default for EvidenceConfig {
     fn default() -> Self {
         Self {
             min_confidence: Decimal::ZERO,
-            confidence_coefficient: Decimal::from_str_exact("0.08")
-                .expect("0.08 literal"),
+            confidence_coefficient: Decimal::from_str_exact("0.15")
+                .expect("0.15 literal"),
+            half_life_ticks: 1000,
         }
     }
 }
@@ -526,6 +529,8 @@ pub struct EngineConfig {
     pub entropy_max: Activation,
     pub dead_node_threshold: Activation,
     pub dead_node_window: usize,
+    // Evidence decay
+    pub evidence_half_life: u64,
     // Spontaneous activation
     pub spontaneous_activation_prob: Activation,
     // Topology parameters
@@ -569,6 +574,7 @@ impl Default for EngineConfig {
             beam_width: 20,
             max_retrieval_depth: 4,
             max_subgraph_size: 500,
+            evidence_half_life: 1000,
             evidence_config: EvidenceConfig::default(),
         }
     }

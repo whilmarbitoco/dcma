@@ -24,6 +24,17 @@ pub struct RetrievalMetadata {
     pub query_nodes: Vec<AtomId>,
 }
 
+impl CognitiveField {
+    /// Record support for all atoms that appeared in the retrieval result.
+    pub fn record_retrieval_evidence(&self, graph: &mut CognitiveGraph, tick: u64) {
+        for atom_id in &self.nodes {
+            if let Some(atom) = graph.get_atom_mut(*atom_id) {
+                atom.record_support_with_tick(tick);
+            }
+        }
+    }
+}
+
 fn compute_field_scores(
     graph: &CognitiveGraph,
     subgraph_nodes: &[NodeIndex],
@@ -466,3 +477,5 @@ mod tests {
         assert!(field.nodes.contains(&id_a), "Single query node should be in result");
     }
 }
+
+

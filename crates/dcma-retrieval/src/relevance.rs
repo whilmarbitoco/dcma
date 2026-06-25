@@ -86,7 +86,7 @@ pub fn relevance(
             let ticks_since = current_tick.saturating_sub(atom.t_last_accessed);
             let recency = exp_approx(-mu * Decimal::from(ticks_since));
             temporal += recency;
-            evidence_conf += atom.evidence.confidence();
+            evidence_conf += atom.evidence_decayed_confidence(evidence_config.half_life_ticks, current_tick);
         }
     }
     coherence /= n;

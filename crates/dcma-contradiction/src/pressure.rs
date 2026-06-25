@@ -99,6 +99,7 @@ impl ContradictionStructure {
         graph: &mut CognitiveGraph,
         activations: &HashMap<AtomId, Activation>,
         config: &EngineConfig,
+        current_tick: u64,
     ) {
         // Collect contradiction edges from the graph
         let contradiction_edges: Vec<(AtomId, AtomId)> = graph
@@ -121,26 +122,26 @@ impl ContradictionStructure {
             match state {
                 EquilibriumState::StableEquilibrium => {
                     if let Some(atom) = graph.get_atom_mut(a) {
-                        atom.evidence.record_support();
+                        atom.record_support_with_tick(current_tick);
                     }
                     if let Some(atom) = graph.get_atom_mut(b) {
-                        atom.evidence.record_support();
+                        atom.record_support_with_tick(current_tick);
                     }
                 }
                 EquilibriumState::Resolved => {
                     if act_a.get() > act_b.get() {
                         if let Some(atom) = graph.get_atom_mut(a) {
-                            atom.evidence.record_support();
+                            atom.record_support_with_tick(current_tick);
                         }
                         if let Some(atom) = graph.get_atom_mut(b) {
-                            atom.evidence.record_oppose();
+                            atom.record_oppose_with_tick(current_tick);
                         }
                     } else if act_b.get() > act_a.get() {
                         if let Some(atom) = graph.get_atom_mut(a) {
-                            atom.evidence.record_oppose();
+                            atom.record_oppose_with_tick(current_tick);
                         }
                         if let Some(atom) = graph.get_atom_mut(b) {
-                            atom.evidence.record_support();
+                            atom.record_support_with_tick(current_tick);
                         }
                     }
                 }
@@ -349,7 +350,7 @@ mod tests {
         activations.insert(id_a, Activation::new(Decimal::ONE));
         activations.insert(id_b, Activation::new(Decimal::from_str_exact("0.1").unwrap()));
 
-        cs.update_all(&mut g, &activations, &config);
+        cs.update_all(&mut g, &activations, &config, 0);
 
         // Should have tracked the contradiction
         assert_eq!(cs.len(), 1);

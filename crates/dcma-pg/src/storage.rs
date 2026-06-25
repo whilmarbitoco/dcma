@@ -20,6 +20,7 @@ pub struct StorageStats {
 }
 
 /// PostgreSQL-backed storage for DCMA
+#[derive(Clone)]
 pub struct PgStorage {
     pool: PgPool,
 }

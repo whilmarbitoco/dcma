@@ -556,7 +556,7 @@ fn main() {
                 .filter(|s| !s.is_empty())
                 .filter_map(|s| parse_atom_id(s).ok())
                 .collect();
-            let state = if let Some(ref url) = cli.pg_url {
+            let mut state = if let Some(ref url) = cli.pg_url {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(async {
                     let storage = dcma_pg::PgStorage::connect(url).await.unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
@@ -565,15 +565,14 @@ fn main() {
             } else {
                 let (rt, _) = load_or_create(&cli.path);
                 let state_ref = rt.state();
-                let cloned = CognitiveState {
+                CognitiveState {
                     graph: state_ref.graph.clone(),
                     activations: state_ref.activations.clone(),
                     contradictions: state_ref.contradictions.clone(),
                     tick: state_ref.tick,
                     history: state_ref.history.clone(),
                     config: state_ref.config.clone(),
-                };
-                cloned
+                }
             };
 
             let activations: HashMap<AtomId, Activation> =
@@ -585,6 +584,8 @@ fn main() {
                 state.tick,
                 &state.config,
             );
+            // Reward evidence for atoms that appeared in retrieval results
+            field.record_retrieval_evidence(&mut state.graph, state.tick);
             println!("Query result:");
             println!("  Nodes: {:?}", field.nodes);
             println!("  Relevance: {}", field.relevance_score);
