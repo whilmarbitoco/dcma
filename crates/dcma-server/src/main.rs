@@ -97,6 +97,7 @@ struct RelationEntry {
 struct IngestResponse {
     atoms_created: usize,
     relations_found: usize,
+    relations_created: usize,
     entity_names: Vec<String>,
 }
 
@@ -289,11 +290,13 @@ async fn ingest(
     }
     let engine = dcma_ingest::IngestEngine::new();
     let extracted = engine.extract_entities(&req.text);
-    let relations = engine.extract_relations(&extracted, &req.text);
+    let extracted_relations = engine.extract_relations(&extracted, &req.text);
     let mut rt = rt.lock().await;
     let mut entity_names = Vec::new();
     let mut atoms_created = 0;
     let mut atoms_merged = 0;
+    let mut relations_created = 0;
+    let mut entity_position_to_id: Vec<(usize, AtomId)> = Vec::new();
 
     for entity in &extracted {
         let atom_type = match entity.entity_type.as_str() {
@@ -304,9 +307,7 @@ async fn ingest(
             _ => AtomType::Concept,
         };
 
-        // Entity resolution: check if an atom with this name already exists
         if let Some(existing) = find_atom_by_name(&rt, &entity.name) {
-            // Merge: update existing atom's content if new extraction has more info
             let existing_content = existing.attributes.get("content").map(|s| s.len()).unwrap_or(0);
             if entity.name.len() > existing_content {
                 if let Some(atom) = rt.state_mut().graph.get_atom_mut(existing.id) {
@@ -314,9 +315,9 @@ async fn ingest(
                 }
             }
             entity_names.push(format!("{} (merged)", entity.name));
+            entity_position_to_id.push((entity.position, existing.id));
             atoms_merged += 1;
         } else {
-            // Check for similar names to avoid near-duplicates
             let similar = find_similar_atoms(&rt, &entity.name);
             if similar.len() > 1 {
                 let best = similar.iter().max_by_key(|a| {
@@ -326,6 +327,7 @@ async fn ingest(
                     atom.attributes.insert("content".to_string(), entity.name.clone());
                 }
                 entity_names.push(format!("{} (merged with similar)", entity.name));
+                entity_position_to_id.push((entity.position, best.id));
                 atoms_merged += 1;
             } else {
                 let id = AtomId::new();
@@ -333,17 +335,35 @@ async fn ingest(
                 atom.attributes.insert("content".to_string(), entity.name.clone());
                 rt.state_mut().graph.add_atom(atom);
                 entity_names.push(entity.name.clone());
+                entity_position_to_id.push((entity.position, id));
                 atoms_created += 1;
             }
         }
     }
+
+    for relation in &extracted_relations {
+        if relation.src_idx < entity_position_to_id.len()
+            && relation.dst_idx < entity_position_to_id.len()
+        {
+            let src = entity_position_to_id[relation.src_idx].1;
+            let dst = entity_position_to_id[relation.dst_idx].1;
+            if src == dst {
+                continue;
+            }
+            let rel_type = parse_relation_type(&relation.relation_type);
+            let _ = rt.state_mut().graph.add_relation(src, dst, rel_type);
+            relations_created += 1;
+        }
+    }
+
     let state = rt.state().clone();
     if let Err(e) = rt.storage().save_state(&state).await {
         tracing::warn!("Failed to persist after ingest: {}", e);
     }
     Ok(Json(IngestResponse {
         atoms_created: atoms_created + atoms_merged,
-        relations_found: relations.len(),
+        relations_found: extracted_relations.len(),
+        relations_created,
         entity_names,
     }))
 }
